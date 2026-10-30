@@ -1,4 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { createTestClient, resetDatabase } from "@/test/db";
+const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
+vi.mock("@/lib/prisma", async () => {
+  const { createTestClient } = await import("@/test/db");
+  db.client = createTestClient();
+  return { prisma: db.client };
+});
+afterAll(async () => { await db.client?.$disconnect(); });
 
 const env = vi.hoisted(() => ({ DOSSIER_SECRET: "s".repeat(40), DOSSIER_PASSWORD: "argon2id:m=19456,t=2,p=1:c2FsdA:aGFzaA" }));
 vi.mock("@/lib/env", () => ({ env }));
@@ -28,7 +37,8 @@ async function signIn(redirectUri = CLAUDE) {
   return { clientId, code };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await resetDatabase(db.client!);
   settings.connectorEnabledAt = "2026-10-23T09:00:00.000Z";
   env.DOSSIER_PASSWORD = "argon2id:m=19456,t=2,p=1:c2FsdA:aGFzaA";
 });
@@ -66,6 +76,31 @@ describe("the Claude connector's sign-in (#221)", () => {
     const renewed = await refresh({ refreshToken: tokens.refresh_token, clientId });
     expect(await verifyAccessToken(renewed.access_token)).toEqual({ clientId });
     await expect(refresh({ refreshToken: tokens.refresh_token, clientId: "someone else" })).rejects.toThrow("The refresh token is invalid or has expired.");
+  });
+
+  it("consumes a code once under concurrent exchange and revokes the replayed session", async () => {
+    const { clientId, code } = await signIn();
+    const results = await Promise.allSettled(Array.from({ length: 2 }, () => exchangeCode({ code, clientId, redirectUri: CLAUDE, verifier: VERIFIER })));
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const winner = results.find((result) => result.status === "fulfilled")!;
+    if (winner.status === "fulfilled") expect(await verifyAccessToken(winner.value.access_token)).toBeNull();
+  });
+
+  it("revokes all access in a session when a rotated refresh token is replayed", async () => {
+    const { clientId, code } = await signIn();
+    const first = await exchangeCode({ code, clientId, redirectUri: CLAUDE, verifier: VERIFIER });
+    const second = await refresh({ refreshToken: first.refresh_token, clientId });
+    expect(await verifyAccessToken(second.access_token)).toEqual({ clientId });
+    await expect(refresh({ refreshToken: first.refresh_token, clientId })).rejects.toThrow("already been used");
+    expect(await verifyAccessToken(first.access_token)).toBeNull();
+    expect(await verifyAccessToken(second.access_token)).toBeNull();
+    await expect(refresh({ refreshToken: second.refresh_token, clientId })).rejects.toThrow("already been used");
+  });
+
+  it("requires the exact redirect used when issuing the code", async () => {
+    const { clientId, code } = await signIn("http://127.0.0.1:1234/callback");
+    await expect(exchangeCode({ code, clientId, redirectUri: "http://127.0.0.1:5678/callback", verifier: VERIFIER })).rejects.toThrow("redirect URI");
   });
 
   it("refuses a wrong verifier, another client or another redirect", async () => {

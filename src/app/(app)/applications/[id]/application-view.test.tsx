@@ -224,7 +224,7 @@ describe("the document tabs (E8-2)", () => {
     render(<ApplicationView {...props} />);
     expect(screen.queryByRole("switch", { name: "Sidebar layout" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Theme: Editorial" }));
+    await user.click(screen.getByRole("button", { name: "Editorial theme" }));
     const menu = screen.getByRole("menu");
     expect(within(menu).getByRole("menuitemradio", { name: "Editorial" })).toHaveAttribute("aria-checked", "true");
     expect(within(menu).getByRole("menuitemradio", { name: "Modern base theme" })).toBeInTheDocument();
@@ -234,17 +234,17 @@ describe("the document tabs (E8-2)", () => {
     // Shown in the new theme while it's saved: Modern has a sidebar, so its layout switch appears.
     await user.click(within(menu).getByRole("menuitemradio", { name: "Modern base theme" }));
     expect(setApplicationTheme).toHaveBeenCalledWith({ id: "app-1", themeId: "modern" });
-    expect(screen.getByRole("button", { name: "Theme: Modern" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modern theme" })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Sidebar layout" })).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Cover letter" }));
-    expect(screen.getByRole("button", { name: "Theme: Modern" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modern theme" })).toBeInTheDocument();
     await act(async () => answer({ ok: true, data: null }));
   });
 
   it("doesn't save the theme the documents already have", async () => {
     const user = userEvent.setup();
     render(<ApplicationView {...props} initialTab="letter" />);
-    await user.click(screen.getByRole("button", { name: "Theme: Editorial" }));
+    await user.click(screen.getByRole("button", { name: "Editorial theme" }));
     await user.click(screen.getByRole("menuitemradio", { name: "Editorial" }));
     expect(setApplicationTheme).not.toHaveBeenCalled();
   });
@@ -399,7 +399,7 @@ describe("editing a unit (E8-3)", () => {
     render(<ApplicationView {...props} resume={{ units, theme: theme("editorial") }} />);
     const marker = screen.getByRole("button", { name: "Check this: “40%”, “2019”" });
     await user.click(marker);
-    expect(screen.getByText(/I couldn't find “40%”, “2019” in your profile or the posting/)).toBeInTheDocument();
+    expect(screen.getByText(/I couldn't find “40%”, “2019” in your recorded candidate facts/)).toBeInTheDocument();
   });
 });
 

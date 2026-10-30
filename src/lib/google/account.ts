@@ -1,5 +1,7 @@
 import "server-only";
 
+import { setTimeout as delay } from "node:timers/promises";
+
 import { prisma } from "@/lib/prisma";
 import { decryptSecret, encryptSecret, GOOGLE_TOKEN, SecretUnreadable } from "@/lib/secrets";
 
@@ -114,25 +116,53 @@ export async function googleFetch<T = unknown>(
 ): Promise<T> {
   const token = await accessToken(group, signal);
   const timeout = AbortSignal.timeout(30_000);
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method,
-      headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      cache: "no-store",
-    });
-  } catch {
-    throw new GoogleError("unavailable", "Couldn't reach Google. Try again in a moment.");
-  }
+  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const path = new URL(url).pathname;
-  if (response.status === 401) {
-    tokens.delete(ACCOUNT_ID);
-    throw new GoogleError("revoked", "Google no longer accepts Dossier's access. Connect your Google account again.", `${path}: 401`);
+  let response: Response;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      response = await fetch(url, {
+        method,
+        headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: requestSignal,
+        cache: "no-store",
+      });
+    } catch {
+      throw new GoogleError("unavailable", "Couldn't reach Google. Try again in a moment.");
+    }
+    if (response.status === 401) {
+      tokens.delete(ACCOUNT_ID);
+      throw new GoogleError("revoked", "Google no longer accepts Dossier's access. Connect your Google account again.", `${path}: 401`);
+    }
+    // Gmail uses 403 for quota exhaustion as well as missing permissions.
+    const reasons: string[] = [];
+    if (response.status === 403) {
+      const failure = await response.json().catch(() => null);
+      for (const error of Array.isArray(failure?.error?.errors) ? failure.error.errors : []) {
+        if (typeof error?.reason === "string") reasons.push(error.reason);
+      }
+    }
+    const rateLimited = response.status === 429 || reasons.some((reason) => ["rateLimitExceeded", "userRateLimitExceeded"].includes(reason));
+    const quota = rateLimited || reasons.includes("dailyLimitExceeded");
+    if (quota) {
+      const retryAfter = response.headers.get("retry-after");
+      const wait = retryAfter === null ? 1000 * 2 ** attempt : /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+      // Never replay writes, including a send whose outcome may be unknown.
+      // Long quota windows are left to the next scheduled check.
+      if (rateLimited && method.toUpperCase() === "GET" && attempt < 3 && Number.isFinite(wait) && wait <= 10_000) {
+        try {
+          await delay(Math.max(1000, wait), undefined, { signal: requestSignal });
+          continue;
+        } catch {
+          // Preserve the actionable quota message on cancellation/timeout.
+        }
+      }
+      throw new GoogleError("quota", "Google asks Dossier to slow down. Try again in a few minutes.", `${path}: ${response.status}`);
+    }
+    if (response.status === 403) throw new GoogleError("scope", "Google refused that. Check the permissions in Settings → Google.", `${path}: 403`);
+    break;
   }
-  if (response.status === 403) throw new GoogleError("scope", "Google refused that. Check the permissions in Settings → Google.", `${path}: 403`);
-  if (response.status === 429) throw new GoogleError("quota", "Google asks Dossier to slow down. Try again in a few minutes.", `${path}: 429`);
   if (response.status === 404 || response.status === 410) {
     throw new GoogleError("unavailable", "Google couldn't find that. It may have been deleted.", `${path}: ${response.status}`, response.status);
   }

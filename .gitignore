@@ -56,3 +56,9 @@ next-env.d.ts
 /e2e/.auth/
 /playwright-report/
 /test-results/
+/output/
+/.local-demo/
+/.local-personal/
+/.playwright-cli/
+/docs/local-evaluation/
+/src/local-review/

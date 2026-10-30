@@ -26,9 +26,9 @@ export type ChatEntry = {
 export type ChatTarget = { label: string; name: string };
 
 const SUBTITLES: Record<Tab, string> = {
-  resume: "Ask for changes to your tailored resume. I'll only use what's in your profile.",
-  letter: "Ask for changes to your cover letter. I'll only use what's in your profile.",
-  email: "Ask for changes to your email. I'll only use what's in your profile.",
+  resume: "Ask for changes to your tailored resume. Review changes against your recorded experience before sending.",
+  letter: "Ask for changes to your cover letter. Review changes against your recorded experience before sending.",
+  email: "Ask for changes to your email. Review changes against your recorded experience before sending.",
   conversation: "Answers to employers are drafted right in the conversation.",
   posting: "Switch to the resume, cover letter or email to make changes.",
   notes: "Switch to the resume, cover letter or email to make changes.",

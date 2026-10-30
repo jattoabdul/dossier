@@ -73,7 +73,7 @@ describe("tailoringSummary (E7-6)", () => {
     expect(summary.list).toContain("Left out Prototyping, HTML & CSS and Workshop facilitation, which this job isn't about");
     expect(summary.list).toContain("Included your references, since the posting asks for them");
     expect(summary.list).toContain("Took your note into account: “Lean on research.”");
-    expect(summary.list).toContain("Marked 2 details to check (not in your profile or the posting)");
+    expect(summary.list).toContain("Marked 2 details to check (not in your recorded candidate facts)");
     expect(summary.foot).toBe("Double-check the marked details before you send anything.");
   });
 

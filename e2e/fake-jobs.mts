@@ -124,5 +124,25 @@ createServer((request, response) => {
     return send(response, 200, { ergebnisliste: [{ referenznummer: "e2e-ba", stellenangebotsTitel: "Produktdesigner (m/w/d)", firma: "Hafenlogik GmbH" }], maxErgebnisse: 1 });
   }
 
+  if (url.pathname === "/freehire/api/v1/agent/jobs/search") {
+    return send(response, 200, {
+      data: [
+        {
+          public_slug: "e2e-ledgerly-designer",
+          source: "greenhouse",
+          title: "Senior Product Designer, Payments",
+          company: "Ledgerly",
+          location: "Rotterdam",
+          url: "https://jobs.example/e2e-ledgerly",
+          work_mode: "onsite",
+          posted_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+          description: "Ledgerly is hiring a Senior Product Designer for its payments team.",
+          enrichment: { salary_min: 75000, salary_max: 90000, salary_currency: "EUR", salary_period: "year" },
+        },
+      ],
+      meta: { total: 1, limit: 20, offset: 0 },
+    });
+  }
+
   send(response, 404, { error: "not found" });
 }).listen(port, "127.0.0.1", () => console.log(`Fake job sources on http://localhost:${port}`));

@@ -125,7 +125,7 @@ describe("the paste step (E7-1)", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
     vi.mocked(handOffToClaude).mockResolvedValue({ ok: true, data: { url: "https://claude.ai/new?q=write" } });
     render(<NewApplication {...props} aiReady={false} writeInClaude />);
-    expect(screen.getByRole("note")).toHaveTextContent(/Dossier has no AI model of its own, so Claude writes this one/);
+    expect(screen.getByRole("note")).toHaveTextContent(/Dossier has no AI model of its own. Continue with Claude/);
     await userEvent.type(screen.getByLabelText("Job posting"), "Ledgerly is hiring.");
     await userEvent.type(screen.getByLabelText(/^Link to the posting/), "https://jobs.example/1");
     await userEvent.click(screen.getByRole("button", { name: "Write it with Claude →" }));
@@ -251,7 +251,7 @@ describe("how you match (E7-4)", () => {
       "~Partly covered: Strong prototyping in FigmaIn your skills, but not linked to a role yet",
       "–Not covered: Experience with paymentsNothing in your profile, so I'll address it honestly in the letter",
     ]);
-    expect(screen.getByText(/^Gaps aren't dealbreakers\./)).toBeInTheDocument();
+    expect(screen.getByText(/^Use these gaps to guide your review\./)).toBeInTheDocument();
   });
 
   it("adds a missing skill to the profile, which makes it partly covered (NEW-5)", async () => {

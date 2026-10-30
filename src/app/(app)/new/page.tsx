@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 
 import { isAiConfigured, isAiUsable } from "@/lib/ai/config";
+import { codexEnabled } from "@/lib/connector/codex";
+import { env } from "@/lib/env";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { DEMO_POSTING } from "@/lib/demo-profile";
 import { postingText } from "@/lib/job-search/search";
@@ -28,6 +30,7 @@ export default async function NewApplicationPage({ searchParams }: PageProps<"/n
   return (
     <NewApplication
       aiReady={aiReady}
+      connectorName={await codexEnabled() ? "Codex" : "Claude"}
       writeInClaude={writeInClaude}
       defaultTone={settings.defaultTone}
       fresh={fresh !== undefined}
@@ -43,7 +46,7 @@ export default async function NewApplicationPage({ searchParams }: PageProps<"/n
             }
       }
       // A first-run helper: only until the first application exists (E7-1).
-      samplePosting={applications === 0 ? DEMO_POSTING : null}
+      samplePosting={env.DOSSIER_DEMO_MODE === "on" && applications === 0 ? DEMO_POSTING : null}
     />
   );
 }

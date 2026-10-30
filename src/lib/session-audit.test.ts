@@ -18,6 +18,7 @@ const OPEN_ROUTES = new Set([
   // The Claude connector (#221) is called by Claude, not the browser: it
   // checks its OAuth token instead, and answers 404 while it's off.
   "src/app/api/mcp/route.ts",
+  "src/app/api/codex/mcp/route.ts", // verifies a revocable, local bearer credential
   "src/app/api/oauth/metadata/route.ts",
   "src/app/api/oauth/protected-resource/route.ts",
   "src/app/api/oauth/register/route.ts",
@@ -78,6 +79,10 @@ describe("session checks (E11-5)", () => {
     for (const file of [...OPEN_ROUTES].filter((entry) => /\/api\/(mcp|oauth)\//.test(entry))) {
       expect(read(file), file).toContain("if (!(await connectorSince())) return new Response(null, { status: 404 });");
     }
+  });
+
+  it("checks the Codex bearer credential inside the endpoint", () => {
+    expect(read("src/app/api/codex/mcp/route.ts")).toContain("await verifyCodexToken(token)");
   });
 
   it("defines every route handler with route()", () => {

@@ -4,6 +4,10 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { checkEnvOnStartup } = await import("@/lib/env");
     checkEnvOnStartup();
+    if (process.env.DOSSIER_DEMO_MODE === "on") {
+      const { demoFetch } = await import("@/lib/demo-network");
+      globalThis.fetch = demoFetch(globalThis.fetch);
+    }
 
     // AI jobs left running by the previous process can't finish (E6-7).
     const { recoverInterruptedJobs } = await import("@/lib/jobs/runner");

@@ -156,6 +156,7 @@ const answers: Record<string, (messages: Message[]) => unknown> = {
         role: "Design Lead",
         company: "Acme Payments",
         location: "Utrecht",
+        descriptor: "Payouts for online marketplaces, 60 people",
         startYear: 2021,
         startMonth: 3,
         endYear: null,
@@ -236,4 +237,4 @@ createServer((request, response) => {
       }
     }, 300);
   });
-}).listen(port, () => console.log(`Fake AI server on http://localhost:${port}`));
+}).listen(port, "127.0.0.1", () => console.log(`Fake AI server on http://127.0.0.1:${port}`));

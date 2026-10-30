@@ -17,3 +17,8 @@ playwright-report
 test-results
 e2e/.auth
 data
+.local-demo
+.local-personal
+output
+src/local-review
+.playwright-cli

@@ -127,7 +127,7 @@ export function PostingResults(props: PostingResultsProps) {
     if (result.ok && "handoff" in result.data) {
       sendPendingTab(chat, result.data.handoff);
       setScoring((current) => without(current, key));
-      toast("Scoring it in Claude. Reload this page once Claude has saved the score.");
+      toast(result.data.handoff.startsWith("/settings?section=codex") ? "Copy the scoring request into Codex. Reload this page after the score is saved." : "Scoring it in Claude. Reload this page once Claude has saved the score.");
       return;
     }
     chat?.close();
@@ -157,6 +157,7 @@ export function PostingResults(props: PostingResultsProps) {
   };
 
   const searched = props.mode === "search" ? props.search.query : null;
+  const radius = props.mode === "search" && SOURCE_INFO[props.search.source].radius;
   const empty =
     mode === "saved"
       ? "Nothing saved yet. Save a posting from your search results to keep it here."
@@ -164,7 +165,9 @@ export function PostingResults(props: PostingResultsProps) {
         ? "Nothing dismissed. Postings you dismiss stay out of your searches and wait here."
         : postings.length > 0 || !searched
           ? "You've dismissed every posting here."
-          : `No postings for “${searched.keywords}”${searched.place ? ` within ${searched.radiusKm} km of ${searched.place}` : ""}. Try a bigger radius or fewer words.`;
+          : radius
+            ? `No postings for “${searched.keywords}”${searched.place ? ` within ${searched.radiusKm} km of ${searched.place}` : ""}. Try a bigger radius or fewer words.`
+            : `No postings for “${searched.keywords}”${searched.place ? ` in ${searched.place}` : ""}. Try fewer words.`;
 
   return (
     <div className="flex flex-wrap items-start gap-6 px-10 pb-16">

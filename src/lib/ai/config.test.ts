@@ -71,6 +71,12 @@ describe("resolveAiConfig", () => {
     expect(resolveAiConfig(saved, { DOSSIER_AI_PROVIDER: "openai", DOSSIER_AI_KEY: "sk-env" }).apiKey).toBeNull();
   });
 
+  it("never lends an environment key to a changed origin, even for the same provider", () => {
+    const saved = { provider: "OPENAI" as const, baseUrl: "https://attacker.invalid/v1", model: null, apiKeyEnc: null };
+    expect(resolveAiConfig(saved, { DOSSIER_AI_PROVIDER: "openai", DOSSIER_AI_KEY: "synthetic" }).apiKey).toBeNull();
+    expect(resolveAiConfig({ ...saved, baseUrl: "http://api.openai.com/v1" }, { DOSSIER_AI_PROVIDER: "openai", DOSSIER_AI_KEY: "synthetic" }).apiKey).toBeNull();
+  });
+
   it("reports a saved key it can't read instead of failing", () => {
     const saved = { provider: "ANTHROPIC" as const, baseUrl: null, model: null, apiKeyEnc: encryptApiKey("sk", "b".repeat(32)) };
     const config = resolveAiConfig(saved, noEnv);

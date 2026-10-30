@@ -5,6 +5,7 @@ import type { FoundPosting } from "@/lib/job-search/search";
 import { storePosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 
+import { codexEnabled } from "./codex";
 import { connectorSince } from "./oauth";
 
 // Handing work to Claude chat (#221): with the Claude connector on and no AI
@@ -23,7 +24,11 @@ export const claudeChatUrl = (prompt: string) => `https://claude.ai/new?q=${enco
 
 /** Whether the buttons hand work to Claude: the connector is on and Dossier has no usable model of its own. */
 export async function handsOffToClaude(aiUsable: boolean): Promise<boolean> {
-  return !aiUsable && (await connectorSince()) !== null;
+  return !aiUsable && ((await codexEnabled()) || (await connectorSince()) !== null);
+}
+
+async function chatUrl(prompt: string) {
+  return await codexEnabled() ? `/settings?section=codex&prompt=${encodeURIComponent(prompt)}` : claudeChatUrl(prompt);
 }
 
 const describe = (title: string, company: string) =>
@@ -51,7 +56,7 @@ function promptFor(kind: Handoff, ref: string, about: string): string {
 export async function handOffFoundPosting(posting: FoundPosting, kind: Handoff): Promise<string> {
   const text = posting.complete ? posting.description : await fullText(posting);
   const stored = await storePosting(text ? { ...posting, description: text, complete: true } : posting);
-  return claudeChatUrl(promptFor(kind, `with posting_id "${stored.id}"`, describe(posting.title, posting.company)));
+  return chatUrl(promptFor(kind, `with posting_id "${stored.id}"`, describe(posting.title, posting.company)));
 }
 
 /** For a posting pasted into New application: keeps its text for Claude to read, and gives the chat to open. */
@@ -60,7 +65,7 @@ export async function handOffPastedPosting({ text, url }: { text: string; url: s
     data: { text, url, expiresAt: new Date(now.getTime() + PASTE_DAYS * 24 * 60 * 60 * 1000) },
     select: { id: true },
   });
-  return claudeChatUrl(promptFor("write", `with paste_id "${paste.id}"`, ""));
+  return chatUrl(promptFor("write", `with paste_id "${paste.id}"`, ""));
 }
 
 /** A pasted posting kept for Claude, or null once it's gone or expired. */

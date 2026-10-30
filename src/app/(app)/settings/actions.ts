@@ -8,7 +8,7 @@ import { AiProvider, Creativity, DateFormat, JobStatus, PaperSize, Tone } from "
 import { action, ActionError } from "@/lib/action";
 import { AiError, createProvider } from "@/lib/ai";
 import { applyApiKeyChange } from "@/lib/ai/api-key";
-import { keyStateOf, loadAiConfig, resolveAiConfig } from "@/lib/ai/config";
+import { keyStateOf, loadAiConfig, resolveAiConfig, sameAiOrigin, PROVIDER_DEFAULTS } from "@/lib/ai/config";
 import type { KeyState } from "@/lib/ai/provider-options";
 import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import { deleteAllBackups } from "@/lib/backups";
@@ -54,7 +54,10 @@ export const saveAiProvider = action(
       provider,
       baseUrl: baseUrl || null,
       model: model || null,
-      ...(current.provider !== provider ? { apiKeyEnc: null } : {}),
+      ...(current.provider !== provider || !sameAiOrigin(
+        resolveAiConfig(current, env).baseUrl,
+        baseUrl || PROVIDER_DEFAULTS[provider].baseUrl,
+      ) ? { apiKeyEnc: null } : {}),
     });
     return { keyState: await currentKeyState() };
   },
@@ -71,10 +74,16 @@ export const saveApiKey = action(
   }),
   async ({ provider, change }) => {
     const current = await loadSettings();
+    if (current.provider && current.provider !== provider) throw new ActionError("The provider changed. Reload Settings before saving its key.");
+    const effective = resolveAiConfig(current, env);
     await saveSettings({
       apiKeyEnc: applyApiKeyChange(current.apiKeyEnc, change),
       // Until now the provider came from DOSSIER_AI_*; the key makes it a saved choice.
-      ...(current.provider ? {} : { provider }),
+      ...(current.provider ? {} : {
+        provider,
+        baseUrl: effective.provider === provider ? effective.baseUrl : PROVIDER_DEFAULTS[provider].baseUrl,
+        model: effective.provider === provider ? effective.model : PROVIDER_DEFAULTS[provider].model,
+      }),
     });
     return { keyState: await currentKeyState() };
   },
@@ -239,6 +248,9 @@ export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }
   await disconnectGoogle().catch(() => {});
 
   await prisma.$transaction(async (tx) => {
+    await tx.careerIntake.deleteMany();
+    await tx.careerArtifact.deleteMany();
+    await tx.careerImport.deleteMany();
     await tx.job.deleteMany();
     // Find jobs' postings and past searches (E14-9, E14-10).
     await tx.posting.deleteMany();
@@ -287,6 +299,7 @@ export const checkUpdates = action(z.object({}), async () => {
 
 /** Turns the Claude connector on, or off, which closes its addresses and signs Claude out. */
 export const setConnector = action(z.object({ on: z.boolean() }), async ({ on }) => {
+  if (on && env.DOSSIER_DEMO_MODE === "on") throw new ActionError("The connector is disabled in the synthetic demo.");
   await saveSettings({ connectorEnabledAt: on ? new Date().toISOString() : null });
   return { on };
 });

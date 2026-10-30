@@ -57,8 +57,8 @@ export function AiBehaviour({ initial }: { initial: Behaviour }) {
       </div>
       <div className="flex flex-col gap-2 border-t border-line py-4">
         <Toggle
-          label="Never invent experience"
-          description="Drafts may only use facts from your profile. If a job asks for something you don't have, I'll say so instead of making it up."
+          label="Ground drafts in your profile"
+          description="Ask the model to use your recorded facts and flag unsupported names, numbers and credentials. Review every claim before sending."
           checked={behaviour.strict}
           onCheckedChange={(strict) => change({ strict })}
         />

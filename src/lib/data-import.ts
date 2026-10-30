@@ -89,6 +89,9 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
       // Out with the old. Applications take their history, documents, chat,
       // notes and jobs along; the other jobs (a resume import, postings read
       // for applications never created) hold the old data too.
+      await tx.careerIntake.deleteMany();
+      await tx.careerArtifact.deleteMany();
+      await tx.careerImport.deleteMany();
       await tx.job.deleteMany();
       await tx.posting.deleteMany();
       await tx.postingSearch.deleteMany();
@@ -115,6 +118,8 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
       ]);
 
       // In with the new.
+      await tx.careerArtifact.createMany({ data: data.careerArtifacts });
+      await tx.careerImport.createMany({ data: data.careerImports.map(entry => ({ ...entry, report: entry.report as Prisma.InputJsonObject })) });
       await tx.profileField.createMany({ data: profile.fields });
       await tx.skill.createMany({ data: profile.skills });
       await tx.language.createMany({ data: profile.languages });
@@ -144,6 +149,7 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
           match: json(application.match),
         })),
       });
+      await tx.careerIntake.createMany({ data: data.careerIntakes });
       await tx.statusEvent.createMany({
         data: applications.flatMap((application) => application.events.map((event) => ({ ...event, applicationId: application.id }))),
       });

@@ -136,6 +136,7 @@ export type NewApplicationProps = {
   aiReady: boolean;
   /** The Claude connector is on and Dossier has no usable AI model: a Claude chat writes it instead (#221). */
   writeInClaude?: boolean;
+  connectorName?: "Codex" | "Claude";
   /** Offered through "Use a sample posting" before the first application. */
   samplePosting: string | null;
   /** Settings → default cover letter tone (SET-6). */
@@ -147,7 +148,7 @@ export type NewApplicationProps = {
 };
 
 /** The new application flow (E7): paste → read → review → create. */
-export function NewApplication({ aiReady, writeInClaude = false, samplePosting, defaultTone, fresh = false, fromPosting = null }: NewApplicationProps) {
+export function NewApplication({ aiReady, writeInClaude = false, connectorName = "Claude", samplePosting, defaultTone, fresh = false, fromPosting = null }: NewApplicationProps) {
   const [initial] = useState<Draft>(() => ({
     step: "paste",
     posting: "",
@@ -245,7 +246,7 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
     setStarting(false);
     if (!result.ok) return void chat?.close();
     sendPendingTab(chat, result.data.url);
-    toast("Writing it in Claude. It shows up under Applications as a Draft once Claude has saved it.");
+    toast(connectorName === "Codex" ? "Copy the request into Codex to prepare this draft." : "Writing it in Claude. It shows up under Applications as a Draft once Claude has saved it.");
   };
 
   // E7-8: the posting's text from its link, to check before reading it.
@@ -357,8 +358,8 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
             <>
               {writeInClaude ? (
                 <p role="note" className="rounded-card border border-line-card bg-card px-4 py-3 text-meta text-muted">
-                  Dossier has no AI model of its own, so Claude writes this one: <strong className="text-ink">Write it with Claude</strong> opens a
-                  chat in Claude that uses your Claude plan and the Dossier connector, and saves the resume and cover letter here as a Draft. To
+                  Dossier has no AI model of its own. Continue with {connectorName}: <strong className="text-ink">Write it with {connectorName}</strong> opens a
+                  request for {connectorName} that uses the Dossier connector, and saves the resume and cover letter here as a Draft. To
                   have Dossier write it instead,{" "}
                   <Link href="/settings?section=ai" className="font-medium text-ink underline underline-offset-2">
                     choose a model in Settings → AI provider
@@ -422,7 +423,7 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
                   aria-disabled={!draft.posting.trim() || starting || undefined}
                   onClick={() => void (starting ? undefined : writeInClaude ? writeWithClaude() : read())}
                 >
-                  {writeInClaude ? "Write it with Claude →" : "Read the posting →"}
+                  {writeInClaude ? `Write it with ${connectorName} →` : "Read the posting →"}
                 </Button>
               </div>
             </>

@@ -11,7 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { JOB_SOURCES, type JobSource, type JSearchHost } from "@/lib/job-search/search";
-import { JOB_KEY_UNREADABLE, JSEARCH_KEY_URLS, SOURCE_INFO, type JobKeyState, type JobSearchSettingsView } from "@/lib/job-search/sources";
+import { FREEHIRE_URL, JOB_KEY_UNREADABLE, JSEARCH_KEY_URLS, SOURCE_INFO, type JobKeyState, type JobSearchSettingsView } from "@/lib/job-search/sources";
 import { cn } from "@/lib/cn";
 
 import { saveJobSearchDetails, saveJobSource, saveJobSourceKey, testJobSource } from "./actions";
@@ -168,8 +168,15 @@ export function JobSearchSection({ initial }: { initial: JobSearchSettingsView }
             {source === "ARBEITSAGENTUR" && (
               <>
                 <ArbeitsagenturNote accepted={Boolean(view.arbeitsagentur.acceptedAt)} onAccept={acceptArbeitsagentur} />
-                <p className="text-sm text-muted">No key needed. The job agent doesn&apos;t search this source; choose JSearch or Adzuna for it.</p>
+                <p className="text-sm text-muted">No key needed. The job agent doesn&apos;t search this source; choose JSearch, Adzuna or FreeHire for it.</p>
               </>
+            )}
+            {source === "FREEHIRE" && (
+              <p className="text-sm text-muted">
+                {view.freehire.host === new URL(FREEHIRE_URL).host
+                  ? `No key needed. Dossier searches FreeHire's public catalogue at ${view.freehire.host}.`
+                  : `No key needed. Dossier searches your own FreeHire at ${view.freehire.host}.`}
+              </p>
             )}
 
             {testable && (

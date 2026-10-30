@@ -85,6 +85,7 @@ export async function loadGoogleClientConfig(): Promise<GoogleClientConfig> {
 
 /** The client in effect, or null while Google isn't set up. */
 export async function googleClient(): Promise<{ id: string; secret: string } | null> {
+  if (env.DOSSIER_DEMO_MODE === "on") return null;
   return (await loadGoogleClientConfig()).client;
 }
 

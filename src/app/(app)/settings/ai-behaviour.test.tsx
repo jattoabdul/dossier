@@ -27,7 +27,7 @@ describe("AI behaviour (E10-2)", () => {
       "Lower keeps drafts close to your own wording. Higher takes more liberties with phrasing, but never with facts.",
     );
     expect(screen.getByRole("radio", { name: "Balanced" })).toBeChecked();
-    expect(screen.getByRole("switch", { name: "Never invent experience" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Ground drafts in your profile" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Show what changed" })).toHaveAccessibleDescription(
       "After each draft, list what was tailored compared with your base resume.",
     );
@@ -46,7 +46,7 @@ describe("AI behaviour (E10-2)", () => {
     const user = userEvent.setup();
     render(<AiBehaviour initial={initial} />);
     expect(screen.queryByText(/^Heads up/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("switch", { name: "Never invent experience" }));
+    await user.click(screen.getByRole("switch", { name: "Ground drafts in your profile" }));
     expect(updateSettings).toHaveBeenLastCalledWith({ strict: false });
     expect(screen.getByRole("status")).toHaveTextContent("Heads up: drafts may now stretch beyond your profile. Double-check before sending.");
   });

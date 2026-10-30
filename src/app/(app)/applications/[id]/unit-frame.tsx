@@ -178,7 +178,7 @@ function UnitEditor({
   );
 }
 
-/** The fact guard's hint (E6-6): details the profile and the posting don't back. */
+/** The fact guard's hint (E6-6): details the recorded candidate facts don't back. */
 function CheckThis({ facts }: { facts: string[] }) {
   const quoted = facts.map((fact) => `“${fact}”`).join(", ");
   return (
@@ -203,7 +203,7 @@ function CheckThis({ facts }: { facts: string[] }) {
         >
           <p className="font-medium">Check this</p>
           <p className="text-muted">
-            I couldn&apos;t find {quoted} in your profile or the posting. If {facts.length === 1 ? "it isn't" : "they aren't"}{" "}
+            I couldn&apos;t find {quoted} in your recorded candidate facts. If {facts.length === 1 ? "it isn't" : "they aren't"}{" "}
             right, edit this part before you send it.
           </p>
         </Popover.Content>

@@ -103,3 +103,10 @@ describe("an application written in Claude chat (#221)", () => {
     expect((await prisma().posting.findUniqueOrThrow({ where: { id: posting.id } })).applicationId).toBe(applicationId);
   });
 });
+
+it("records Codex provenance on documents and extracted data", async () => {
+  const result = await saveWrittenApplication(written(), "codex-chat");
+  const application = await prisma().application.findUniqueOrThrow({ where: { id: result.applicationId }, include: { documents: true } });
+  expect(application.extractedWith).toBe("codex-chat");
+  expect(application.documents.map(document => document.writtenWith)).toEqual(["codex-chat", "codex-chat"]);
+});

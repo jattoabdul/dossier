@@ -1,10 +1,11 @@
 import "server-only";
 
 import { z } from "zod";
+import { env } from "@/lib/env";
 
 import { googleFetch } from "./account";
 import { googleUrl } from "./endpoints";
-import { isGone } from "./errors";
+import { GoogleError, isGone } from "./errors";
 import { buildMessage, decodeHeader, htmlToText, toBase64Url, type OutgoingMail } from "./mime";
 
 // The parts of the Gmail API Dossier uses (E15-2, E15-3).
@@ -13,6 +14,7 @@ const api = (path: string) => googleUrl("gmail", `/gmail/v1/users/me${path}`);
 
 /** Sends a message; with `threadId` it joins that thread. */
 export async function sendMail(mail: OutgoingMail, { threadId }: { threadId?: string } = {}): Promise<{ id: string; threadId: string }> {
+  if (env.DOSSIER_DEMO_MODE === "on" || env.DOSSIER_EMAIL_SEND === "off") throw new Error("Email sending is disabled on this instance.");
   const raw = toBase64Url(buildMessage(mail));
   const sent = await googleFetch<{ id: string; threadId: string }>("send", api("/messages/send"), {
     method: "POST",
@@ -146,10 +148,19 @@ export async function messagesSince(historyId: string, signal?: AbortSignal): Pr
 }
 
 /** Message ids matching a Gmail search, newest first, up to `max`. */
-export async function searchMessages(query: string, { max = 100, signal }: { max?: number; signal?: AbortSignal } = {}): Promise<string[]> {
-  const url = new URL(api("/messages"));
-  url.searchParams.set("q", query);
-  url.searchParams.set("maxResults", String(Math.min(max, 500)));
-  const page = await googleFetch<{ messages?: { id: string }[] }>("read", url, { signal });
-  return (page.messages ?? []).map((message) => message.id);
+export async function searchMessages(query: string, { max = 100, requireComplete = false, signal }: { max?: number; requireComplete?: boolean; signal?: AbortSignal } = {}): Promise<string[]> {
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+  do {
+    const url = new URL(api("/messages"));
+    url.searchParams.set("q", query);
+    url.searchParams.set("maxResults", String(Math.min(max - ids.length, 500)));
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const page = await googleFetch<{ messages?: { id: string }[]; nextPageToken?: string }>("read", url, { signal });
+    ids.push(...(page.messages ?? []).map((message) => message.id));
+    pageToken = page.nextPageToken;
+  } while (pageToken && ids.length < max);
+  // A sync must not advance its history cursor past an incomplete initial search.
+  if (pageToken && requireComplete) throw new GoogleError("unavailable", "There is too much mail for this first check. Use a shorter lookback before trying again.");
+  return ids.slice(0, max);
 }

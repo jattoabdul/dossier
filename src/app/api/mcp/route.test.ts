@@ -5,6 +5,8 @@ const settings = vi.hoisted(() => ({ connectorEnabledAt: "2026-10-23T09:00:00.00
 vi.mock("@/lib/settings-data", () => ({ loadSettings: async () => settings }));
 const db = vi.hoisted(() => ({ postingSearch: { findUnique: vi.fn() }, postingScore: { upsert: vi.fn() } }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
+// Replay/rotation use the real database in connector/oauth.db.test.ts.
+vi.mock("@/lib/connector/token-store", () => ({ consumeCode: async () => true, rotateRefresh: async () => true, sessionActive: async () => true }));
 vi.mock("@/lib/ai/config", () => ({ isAiUsable: async () => false }));
 vi.mock("@/lib/profile-data", async () => {
   const { demoProfile } = await import("@/lib/demo-profile");

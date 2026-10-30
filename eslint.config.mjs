@@ -21,6 +21,9 @@ const eslintConfig = defineConfig([
     // End-to-end test output.
     "playwright-report/**",
     "test-results/**",
+    // Private instance data, migration snapshots and one-off review scripts.
+    ".local-personal/**",
+    ".local-demo/**",
   ]),
 ]);
 

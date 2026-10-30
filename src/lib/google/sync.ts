@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { ApplicationStatus, DocumentKind, EmailDirection } from "@/generated/prisma/enums";
 import { getAiProvider } from "@/lib/ai";
-import { isAiConfigured } from "@/lib/ai/config";
+import { isAiUsable } from "@/lib/ai/config";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { classifyReply } from "@/lib/ai/tasks";
 import { unitsSchema } from "@/lib/application-data";
@@ -18,7 +18,7 @@ import { googleConnection, loadGoogleAccount } from "./account";
 import { pullInterviewEvents } from "./availability";
 import { GoogleError } from "./errors";
 import { currentHistoryId, getMessage, messagesSince, searchMessages, type ReadMail } from "./gmail";
-import { matchMail, worthSuggesting, type MatchableApplication } from "./matching";
+import { initialInboxQuery, isApplicationNoise, matchMail, worthSuggesting, type MatchableApplication } from "./matching";
 import { parseAddress, stripQuoted } from "./mime";
 
 // The inbox check (E15-3): new mail since the last check, matched to
@@ -28,7 +28,7 @@ import { parseAddress, stripQuoted } from "./mime";
 /** Mail is kept up to this length. */
 const MAX_BODY = 20_000;
 /** The first check looks this far back. */
-const FIRST_LOOK = "newer_than:21d";
+const FIRST_LOOK_DAYS = 21;
 /** Gmail's tabs for mail that's never about an application. */
 const NOISE_LABELS = ["CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_FORUMS", "SPAM", "TRASH", "CHAT"];
 
@@ -70,11 +70,12 @@ export type SyncResult = { fetched: number; kept: number; read: number };
  * One check. Returns what it did; a failure is kept on the account, so
  * Settings can show it, and cleared by the next success.
  */
-export async function syncInbox({ signal }: { signal?: AbortSignal } = {}): Promise<SyncResult> {
+export async function syncInbox({ signal, backfillDays }: { signal?: AbortSignal; backfillDays?: number } = {}): Promise<SyncResult> {
+  if (backfillDays !== undefined && (!Number.isInteger(backfillDays) || backfillDays < 1 || backfillDays > 90)) throw new Error("Backfill must be between 1 and 90 days.");
   const [account, settings] = await Promise.all([loadGoogleAccount(), loadSettings()]);
   if (!account) throw new GoogleError("not-connected", "Connect your Google account in Settings → Google first.");
   try {
-    const result = await runSync(account.historyId, account.email, settings.gmailScope, signal);
+    const result = await runSync(account.historyId, account.email, settings.gmailScope, signal, backfillDays);
     await prisma.googleAccount.update({ where: { id: account.id }, data: { lastSyncAt: new Date(), syncProblem: null, historyId: result.historyId } });
     return result.counts;
   } catch (error) {
@@ -85,17 +86,22 @@ export async function syncInbox({ signal }: { signal?: AbortSignal } = {}): Prom
   }
 }
 
-async function runSync(historyId: string | null, ownAddress: string, scope: "known" | "all", signal?: AbortSignal) {
+async function runSync(historyId: string | null, ownAddress: string, scope: "known" | "all", signal?: AbortSignal, backfillDays?: number) {
+  const [applications, threads, aiReady] = await Promise.all([matchables(), knownThreads(), isAiUsable()]);
   let ids: string[];
   let next: string;
-  const since = historyId ? await messagesSince(historyId, signal) : null;
+  const since = historyId && backfillDays === undefined ? await messagesSince(historyId, signal) : null;
   if (since) {
     ids = since.ids;
     next = since.historyId;
   } else {
     // First check, or Gmail forgot where the last one was: look back a few weeks.
     next = await currentHistoryId(signal);
-    ids = await searchMessages(`${FIRST_LOOK} -in:chats -category:promotions -category:social`, { max: 200, signal });
+    const days = backfillDays ?? FIRST_LOOK_DAYS;
+    const query = scope === "known" && threads.size === 0
+      ? initialInboxQuery(applications, days)
+      : `newer_than:${days}d -in:chats -category:promotions -category:social`;
+    ids = query ? await searchMessages(query, { max: 500, requireComplete: true, signal }) : [];
   }
 
   const seen = new Set((await prisma.emailMessage.findMany({ where: { gmailId: { in: ids } }, select: { gmailId: true } })).map((entry) => entry.gmailId));
@@ -103,7 +109,6 @@ async function runSync(historyId: string | null, ownAddress: string, scope: "kno
   const counts = { fetched: fresh.length, kept: 0, read: 0 };
   if (fresh.length === 0) return { historyId: next, counts };
 
-  const [applications, threads, aiReady] = await Promise.all([matchables(), knownThreads(), isAiConfigured()]);
   const kept: string[] = [];
   // Oldest first, so a thread's first mail links it for the ones after.
   const mails: ReadMail[] = [];
@@ -116,7 +121,7 @@ async function runSync(historyId: string | null, ownAddress: string, scope: "kno
   for (const mail of mails) {
     const from = parseAddress(mail.from);
     const outgoing = mail.labels.includes("SENT") || from.address === ownAddress.toLowerCase();
-    if (mail.labels.some((label) => NOISE_LABELS.includes(label))) continue;
+    if (mail.labels.some((label) => NOISE_LABELS.includes(label)) || isApplicationNoise({ fromAddress: from.address, subject: mail.subject })) continue;
     const match = matchMail({ threadId: mail.threadId, fromName: from.name, fromAddress: from.address, subject: mail.subject }, applications, threads);
     // Your own mail only counts in a thread Dossier knows; other mail by the setting.
     if (!match && (outgoing || scope === "known" || !mail.labels.includes("INBOX"))) continue;
@@ -141,7 +146,7 @@ async function runSync(historyId: string | null, ownAddress: string, scope: "kno
       },
       update: {},
     });
-    if (match) threads.set(mail.threadId, match.applicationId);
+    if (match?.applicationId) threads.set(mail.threadId, match.applicationId);
     counts.kept++;
     if (!outgoing) kept.push(created.id);
   }

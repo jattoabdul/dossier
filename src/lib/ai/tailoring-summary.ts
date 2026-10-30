@@ -105,7 +105,7 @@ export function tailoringSummary({
 
   const flagged = [...resume, ...letter].reduce((count, entry) => count + (entry.unverified?.length ?? 0), 0);
   if (strict && flagged > 0) {
-    list.push(`Marked ${flagged === 1 ? "one detail" : `${flagged} details`} to check (not in your profile or the posting)`);
+    list.push(`Marked ${flagged === 1 ? "one detail" : `${flagged} details`} to check (not in your recorded candidate facts)`);
   }
 
   const foot = !strict

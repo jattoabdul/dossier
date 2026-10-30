@@ -85,6 +85,21 @@ describe("saveApiKey", () => {
     expect(decryptApiKey(apiKeyEnc!)).toBe("sk-ant-secret");
   });
 
+  it("removes an existing key when only the endpoint origin changes", async () => {
+    await saveAiProvider({ provider: "OPENAI", baseUrl: "https://trusted.invalid/v1", model: "test" });
+    await saveApiKey({ provider: "OPENAI", change: { action: "set", value: "synthetic-key" } });
+    await saveAiProvider({ provider: "OPENAI", baseUrl: "https://trusted.invalid/v2", model: "test" });
+    expect((await settings()).apiKeyEnc).not.toBeNull();
+    await saveAiProvider({ provider: "OPENAI", baseUrl: "https://other.invalid/v1", model: "test" });
+    expect((await settings()).apiKeyEnc).toBeNull();
+  });
+
+  it("rejects a stale key form for a different provider", async () => {
+    await saveAiProvider({ provider: "OPENAI", baseUrl: "https://api.openai.com/v1", model: "test" });
+    expect(await saveApiKey({ provider: "ANTHROPIC", change: { action: "set", value: "synthetic" } })).toMatchObject({ ok: false });
+    expect((await settings()).apiKeyEnc).toBeNull();
+  });
+
   it("saves the provider too when it only came from the environment", async () => {
     await saveApiKey({ provider: "ANTHROPIC", change: { action: "set", value: "sk-ant" } });
     expect(await settings()).toMatchObject({ provider: "ANTHROPIC" });
@@ -159,6 +174,7 @@ describe("job search settings (E14-4)", () => {
         jsearch: { host: "openwebninja", keyState: "none" },
         adzuna: { appId: "", keyState: "none" },
         arbeitsagentur: { offered: true, acceptedAt: null },
+        freehire: { host: "freehire.me" },
       },
     });
     await saveJobSource({ source: "OFF" });

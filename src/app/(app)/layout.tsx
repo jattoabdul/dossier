@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { env } from "@/lib/env";
 import { after } from "next/server";
 
 import { countAgentQueue } from "@/lib/agent/view";
@@ -25,7 +26,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   await verifySession();
   // The day's usage ping and update check, if they haven't run yet: after the page, so they never slow one down.
   after(notePageLoad);
-  after(checkForUpdatesDaily);
+  if (env.DOSSIER_DEMO_MODE !== "on") after(checkForUpdatesDaily);
   // The browser's zone, for the inbox check, which runs without a request.
   const zone = await userTimeZone();
   after(() => rememberBrowserTimeZone(zone));
@@ -55,6 +56,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
           starts with its page bar (PageHeader or PageBar), which draws the
           panel's top edge and stays in view. */}
       <div className="flex min-w-0 flex-1 flex-col bg-paper px-2 pb-2">
+        {env.DOSSIER_DEMO_MODE === "on" && <p role="status" className="rounded-control bg-primary p-3 text-sm text-on-primary">Synthetic demo: Jane Doe sample data and simulated AI responses. Email and external integrations are disabled.</p>}
         <main
           id="main"
           tabIndex={-1}
