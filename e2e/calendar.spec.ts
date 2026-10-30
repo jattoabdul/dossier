@@ -24,8 +24,9 @@ const dayLabel = (day: string) => new Intl.DateTimeFormat("en-GB", { timeZone: "
 
 test("shows interviews and Google's events, and keeps interviews in step both ways", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  const [northstar] = await sql<{ id: string; nextInterviewAt: Date }>(`SELECT id, "nextInterviewAt" FROM "Application" WHERE company = 'Northstar Health'`);
-  const interview = () => sql<{ nextInterviewAt: Date | null; interviewEventId: string | null }>(`SELECT "nextInterviewAt", "interviewEventId" FROM "Application" WHERE id = $1`, [northstar.id]).then(([row]) => row);
+  // Prisma's timestamp columns contain UTC. pg otherwise interprets them in the test runner's local zone.
+  const [northstar] = await sql<{ id: string; nextInterviewAt: Date }>(`SELECT id, "nextInterviewAt" AT TIME ZONE 'UTC' AS "nextInterviewAt" FROM "Application" WHERE company = 'Northstar Health'`);
+  const interview = () => sql<{ nextInterviewAt: Date | null; interviewEventId: string | null }>(`SELECT "nextInterviewAt" AT TIME ZONE 'UTC' AS "nextInterviewAt", "interviewEventId" FROM "Application" WHERE id = $1`, [northstar.id]).then(([row]) => row);
   // The day of the demo's interview, in the browser's zone, which the app uses too.
   await page.goto("/");
   const day = await page.evaluate((iso) => new Date(iso).toLocaleDateString("en-CA"), northstar.nextInterviewAt.toISOString());

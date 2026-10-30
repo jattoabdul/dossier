@@ -94,6 +94,20 @@ describe("useAutosave", () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks reload while an edit is queued, until the save is acknowledged", async () => {
+    const { save, calls } = controlledSave();
+    const { rerender } = setup(save);
+    rerender({ value: "unsaved edit" });
+    const leaving = new Event("beforeunload", { cancelable: true });
+    act(() => void window.dispatchEvent(leaving));
+    expect(leaving.defaultPrevented).toBe(true);
+    expect(save).toHaveBeenCalledExactlyOnceWith("unsaved edit");
+    await act(async () => calls[0].resolve());
+    const saved = new Event("beforeunload", { cancelable: true });
+    act(() => void window.dispatchEvent(saved));
+    expect(saved.defaultPrevented).toBe(false);
+  });
+
   it("saves pending changes when the page is hidden and when the form unmounts", () => {
     const { save } = controlledSave();
     const { rerender, unmount } = setup(save);

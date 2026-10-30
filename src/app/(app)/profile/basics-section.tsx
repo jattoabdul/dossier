@@ -12,7 +12,6 @@ import { ageOn, isOptionalBasic, type Basics, type BasicsField } from "@/lib/pro
 
 import { saveBasics } from "./actions";
 import { PhotoField } from "./photo-field";
-import { useTrackSave } from "@/components/save-tracker";
 
 type FieldSpec = {
   field: Exclude<BasicsField, "summary">;
@@ -72,8 +71,9 @@ export function BasicsSection({
   photo: ProfilePhoto | null;
   onPhotoChange: (photo: ProfilePhoto | null) => void;
 }) {
-  const track = useTrackSave();
-  const { flush } = useAutosave(basics, (value) => track(saveBasics(value)));
+  const { flush } = useAutosave(basics, saveBasics, 500, {
+    key: "profile:basics", label: "Profile basics", restore: onChange,
+  });
   // Hints show once you've left a field, not while you're typing in it.
   const [visited, setVisited] = useState<Set<BasicsField>>(new Set());
 

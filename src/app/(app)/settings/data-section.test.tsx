@@ -13,9 +13,9 @@ vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unk
 vi.mock("./actions", () => ({
   startZippingPdfs: vi.fn(async () => ({ ok: true, data: { jobId: "zip-1", documents: 12 } })),
   updateSettings: vi.fn(async () => ({ ok: true, data: null })),
-  deleteEverything: vi.fn(async () => undefined),
+  deleteEverything: vi.fn(async () => ({ ok: true, data: null })),
 }));
-const router = vi.hoisted(() => ({ refresh: vi.fn() }));
+const router = vi.hoisted(() => ({ refresh: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 const jobs = vi.hoisted(() => ({ report: undefined as undefined | ((job: unknown) => void) }));
 vi.mock("@/hooks/use-job", async () => {
@@ -213,10 +213,13 @@ describe("Delete everything (E10-8)", () => {
   it("deletes once DELETE is typed", async () => {
     const user = userEvent.setup();
     const box = await open(user);
+    sessionStorage.setItem("dossier:autosave:v1:profile:basics", "local draft");
     await user.type(box, "DELETE");
     expect(screen.getByRole("button", { name: "Delete for good" })).not.toHaveAttribute("aria-disabled");
     await user.click(screen.getByRole("button", { name: "Delete for good" }));
     expect(deleteEverything).toHaveBeenCalledWith({ confirm: "DELETE" });
+    expect(sessionStorage.getItem("dossier:autosave:v1:profile:basics")).toBeNull();
+    expect(router.replace).toHaveBeenCalledWith("/");
   });
 
   it("cancels", async () => {
@@ -224,5 +227,18 @@ describe("Delete everything (E10-8)", () => {
     await open(user);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("textbox", { name: "Type DELETE to confirm" })).not.toBeInTheDocument();
+  });
+
+  it("keeps recovery copies when deletion fails", async () => {
+    const user = userEvent.setup();
+    router.replace.mockClear();
+    vi.mocked(deleteEverything).mockResolvedValueOnce({ ok: false, error: "Try again." });
+    const box = await open(user);
+    sessionStorage.setItem("dossier:autosave:v1:profile:basics", "local draft");
+    await user.type(box, "DELETE");
+    await user.click(screen.getByRole("button", { name: "Delete for good" }));
+    expect(sessionStorage.getItem("dossier:autosave:v1:profile:basics")).toBe("local draft");
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenLastCalledWith("Try again.");
   });
 });

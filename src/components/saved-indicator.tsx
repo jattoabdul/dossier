@@ -38,7 +38,7 @@ export function SavedIndicator({
 }) {
   const now = useNow(30_000);
   const visible =
-    status === "saving"
+    status === "pending" ? "Unsaved changes" : status === "saving"
       ? "Saving…"
       : status === "error"
         ? "Couldn't save"
@@ -46,7 +46,7 @@ export function SavedIndicator({
           ? savedLabel(savedAt, now > savedAt ? now : savedAt)
           : "All changes saved";
   const announced =
-    status === "saved"
+    status === "pending" ? "Unsaved changes need your review." : status === "saved"
       ? "All changes saved."
       : status === "error"
         ? "Couldn't save your changes."

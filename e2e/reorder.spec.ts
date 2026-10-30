@@ -35,6 +35,8 @@ test("moves roles by keyboard and by dragging, and the resume follows", async ({
   await page.mouse.up();
   await expect.poll(() => roles(page)).toEqual(["Product Designer", "UX Designer", "Senior Product Designer"]);
 
+  // The optimistic order is visible before its write finishes. Reload only after acknowledgement.
+  await expect(page.getByText("Saved just now")).toBeVisible();
   await page.reload();
   expect(await roles(page)).toEqual(["Product Designer", "UX Designer", "Senior Product Designer"]);
 

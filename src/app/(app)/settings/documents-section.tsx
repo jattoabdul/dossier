@@ -63,7 +63,10 @@ export function DocumentsSection({
   };
 
   const { flush } = useAutosave(settings.fileNamePattern, (fileNamePattern) =>
-    track(updateSettings({ fileNamePattern })),
+    updateSettings({ fileNamePattern }), 500, {
+      key: "settings:file-name-pattern", label: "File name pattern",
+      restore: (fileNamePattern) => setSettings((current) => ({ ...current, fileNamePattern })),
+    },
   );
 
   const insertToken = (token: string) => {

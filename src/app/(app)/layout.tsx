@@ -13,6 +13,8 @@ import { checkForUpdatesDaily, updateNotice } from "@/lib/update-check";
 import { askForUsagePing, notePageLoad, USAGE_PING_HOST } from "@/lib/usage-ping";
 import { appVersion } from "@/lib/version";
 
+import { SaveBoundary } from "@/components/save-boundary";
+
 import { Sidebar } from "./sidebar";
 import { UsagePingDialog } from "./usage-ping-dialog";
 
@@ -37,6 +39,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   const [waiting, agent] = await Promise.all([inboxCount().catch(() => 0), countAgentQueue().catch(() => 0)]);
 
   return (
+    <SaveBoundary>
     <div className="flex min-h-screen">
       <a
         href="#main"
@@ -68,5 +71,6 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       {/* Asked once, until answered (#172); nothing is sent before a yes. */}
       {askForUsagePing(settings) && <UsagePingDialog host={USAGE_PING_HOST} />}
     </div>
+    </SaveBoundary>
   );
 }

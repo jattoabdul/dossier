@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { use, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { toast } from "@/components/toast";
+import { TrackSaveContext } from "@/components/save-tracker";
+import { PendingSavesContext } from "@/components/save-boundary";
+import { clearAutosaveDraft, readAutosaveDraft, sameDraftValue, writeAutosaveDraft } from "@/lib/autosave-draft";
 
-export type AutosaveStatus = "idle" | "saving" | "saved" | "error";
+export type AutosaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
+type RecoveryOptions<T> = { key: string; label: string; restore: (value: T) => void };
 
 const COULD_NOT_SAVE =
   "Couldn't save your changes. They're still on this page, and saving will try again when you edit or leave the field.";
@@ -22,11 +26,9 @@ function failureMessage(result: unknown): string | null {
     typeof result === "object" &&
     result !== null &&
     "ok" in result &&
-    result.ok === false &&
-    "error" in result &&
-    typeof result.error === "string"
+    result.ok === false
   ) {
-    return result.error;
+    return "error" in result && typeof result.error === "string" ? result.error : COULD_NOT_SAVE;
   }
   return null;
 }
@@ -37,12 +39,18 @@ function failureMessage(result: unknown): string | null {
  * so the newest value is always the one saved last and responses can't
  * arrive out of order. A failed save is retried once.
  */
-export function createAutosaver<T>({ save: initialSave, delay, onStatus, onFailure }: AutosaverOptions<T>) {
+export function createAutosaver<T>({ save: initialSave, delay, onStatus: initialStatus, onFailure }: AutosaverOptions<T>) {
   let save = initialSave;
+  let onStatus = initialStatus;
   let pending: { value: T } | null = null; // changed, not yet sent
   let failed: { value: T } | null = null; // sent, not saved; retried on the next flush
   let timer: ReturnType<typeof setTimeout> | undefined;
   let saving = false;
+  const waiters = new Set<(saved: boolean) => void>();
+  const settle = (saved: boolean) => {
+    for (const resolve of waiters) resolve(saved);
+    waiters.clear();
+  };
 
   async function attempt(value: T): Promise<string | null> {
     try {
@@ -66,8 +74,10 @@ export function createAutosaver<T>({ save: initialSave, delay, onStatus, onFailu
       failed = { value };
       onStatus("error");
       onFailure(failure);
+      settle(false);
     } else {
       onStatus("saved", new Date());
+      settle(true);
     }
   }
 
@@ -81,17 +91,20 @@ export function createAutosaver<T>({ save: initialSave, delay, onStatus, onFailu
   }
 
   /** Saves the latest change now instead of waiting for the debounce. */
-  function flush() {
+  function flush(): Promise<boolean> {
     clearTimeout(timer);
     timer = undefined;
-    if (saving) return; // run() sends it when the current save finishes
+    if (saving) return new Promise((resolve) => waiters.add(resolve));
     const next = pending ?? failed;
     pending = null;
     failed = null;
     if (next) {
+      const done = new Promise<boolean>((resolve) => waiters.add(resolve));
       onStatus("saving");
       void run(next.value);
+      return done;
     }
+    return Promise.resolve(true);
   }
 
   /** Uses a new save function from now on, e.g. one that closes over newer props. */
@@ -99,15 +112,17 @@ export function createAutosaver<T>({ save: initialSave, delay, onStatus, onFailu
     save = next;
   }
 
-  return { change, flush, setSave };
+  return { change, flush, setSave, setStatusListener: (listener: typeof onStatus) => { onStatus = listener; },
+    reportStatus: (status: AutosaveStatus) => onStatus(status),
+    isDirty: () => saving || pending !== null || failed !== null };
 }
 
 /**
  * Saves `value` automatically, `delay` ms after it stops changing, for forms
  * without a Save button (PRD PRO-10). Typing is never blocked.
  *
- * Pending changes are also saved when the page is hidden or closed and when
- * the component unmounts (e.g. on navigation); call `flush` from `onBlur` to
+ * Reload/close warns while writes are outstanding. Hiding the page and
+ * unmounting also flush, but cannot guarantee delivery during unload. Call `flush` from `onBlur` to
  * save when the user leaves a field. When a save fails twice, an error toast
  * appears and the value stays in the form.
  *
@@ -119,7 +134,18 @@ export function useAutosave<T>(
   value: T,
   save: (value: T) => Promise<unknown>,
   delay = 500,
+  recovery?: RecoveryOptions<T>,
 ): { status: AutosaveStatus; savedAt: Date | null; flush: () => void } {
+  const track = use(TrackSaveContext);
+  const boundary = use(PendingSavesContext);
+  const [identity] = useState(() => ({}));
+  const report = useRef(track.report);
+  const draft = useRef(recovery);
+  const base = useRef(value);
+  const lastSeen = useRef(value);
+  const recoveryChecked = useRef(false);
+  const conflict = useRef(false);
+  const storageWarning = useRef(false);
   const [state, setState] = useState<{ status: AutosaveStatus; savedAt: Date | null }>({
     status: "idle",
     savedAt: null,
@@ -129,8 +155,7 @@ export function useAutosave<T>(
     createAutosaver<T>({
       save,
       delay,
-      onStatus: (status, savedAt) =>
-        setState((previous) => ({ status, savedAt: savedAt ?? previous.savedAt })),
+      onStatus: () => {},
       onFailure: toast,
     }),
   );
@@ -138,28 +163,82 @@ export function useAutosave<T>(
   // Always call the latest `save`, without restarting the autosaver.
   useLayoutEffect(() => {
     saver.setSave(save);
+    report.current = track.report;
+    draft.current = recovery;
+    saver.setStatusListener((status, savedAt) => {
+      setState((previous) => ({ status, savedAt: savedAt ?? previous.savedAt }));
+      report.current?.(identity, status, savedAt);
+      if (status === "saved" && !conflict.current) {
+        base.current = lastSeen.current;
+        if (draft.current) clearAutosaveDraft(draft.current.key);
+      }
+    });
   });
 
+  useLayoutEffect(() => boundary?.register(saver, recovery?.key), [boundary, saver, recovery?.key]);
+
   // Save changes, but not the value the form started with.
-  const lastSeen = useRef(value);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!recoveryChecked.current) {
+      recoveryChecked.current = true;
+      const options = draft.current;
+      const recovered = options && readAutosaveDraft(options.key, value);
+      if (options && recovered) {
+        if (sameDraftValue(recovered.value, value)) clearAutosaveDraft(options.key);
+        else if (sameDraftValue(recovered.base, value)) {
+          options.restore(recovered.value);
+          saver.change(recovered.value);
+          toast("Recovered unsaved changes from this tab.");
+        } else if (boundary) {
+          conflict.current = true;
+          saver.reportStatus("error");
+          boundary.recover({
+            key: options.key, label: options.label, current: value, recovered: recovered.value,
+            resolve: (useDraft) => {
+              conflict.current = false;
+              if (useDraft) {
+                options.restore(recovered.value);
+                saver.change(recovered.value);
+              } else {
+                clearAutosaveDraft(options.key);
+                saver.reportStatus("idle");
+              }
+            },
+          });
+        }
+      }
+    }
     if (Object.is(lastSeen.current, value)) return;
     lastSeen.current = value;
+    const options = draft.current;
+    if (options && !conflict.current && !writeAutosaveDraft(options.key, { base: base.current, value }) && !storageWarning.current) {
+      storageWarning.current = true;
+      toast("This browser couldn't keep a recovery copy. Wait for Saved before reloading.");
+    }
     saver.change(value);
-  }, [saver, value]);
+  }, [saver, value, boundary, identity]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") saver.flush();
     };
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!saver.isDirty()) return;
+      event.preventDefault();
+      event.returnValue = "";
+      void saver.flush();
+    };
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pagehide", saver.flush);
+    window.addEventListener("beforeunload", beforeUnload);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", saver.flush);
+      window.removeEventListener("beforeunload", beforeUnload);
       saver.flush(); // leaving the page, e.g. navigating to another screen
     };
   }, [saver]);
 
-  return { status: state.status, savedAt: state.savedAt, flush: saver.flush };
+  const [flush] = useState(() => () => { void saver.flush(); });
+  return { status: state.status, savedAt: state.savedAt, flush };
 }

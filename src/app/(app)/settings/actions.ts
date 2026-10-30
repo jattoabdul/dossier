@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { AiProvider, Creativity, DateFormat, JobStatus, PaperSize, Tone } from "@/generated/prisma/enums";
@@ -284,7 +283,8 @@ export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }
   await Promise.all([deleteAllBackups(), deleteAllDownloads()]);
 
   revalidatePath("/", "layout");
-  redirect("/");
+  // Let the caller remove this tab's recovery copies before opening the empty dashboard.
+  return null;
 });
 
 /** "Check for updates" (E10-9): the latest release, asked for now, and kept for the sidebar's notice. */

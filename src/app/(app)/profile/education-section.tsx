@@ -9,7 +9,6 @@ import { formatDateRange, type EducationItem, type EntryOrder, type ProfileData 
 import { createEducation, removeEducation, reorderEntries, restoreEducation, saveEducation, sortEntriesByDate } from "./actions";
 import { EntryList } from "./entry-list";
 import { MonthYearField } from "./month-year-field";
-import { useTrackSave } from "@/components/save-tracker";
 import type { UpdateProfile } from "./skills-section";
 
 function EducationForm({
@@ -21,8 +20,9 @@ function EducationForm({
   onChange: (entry: EducationItem) => void;
   autoFocus: boolean;
 }) {
-  const track = useTrackSave();
-  const { flush } = useAutosave(entry, (value) => track(saveEducation(value)));
+  const { flush } = useAutosave(entry, saveEducation, 500, {
+    key: `education:${entry.id}`, label: "Education", restore: onChange,
+  });
   const set = (change: Partial<EducationItem>) => onChange({ ...entry, ...change });
 
   return (

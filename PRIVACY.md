@@ -2,7 +2,7 @@
 
 Dossier is a single-user app you run on your own server. This page is for whoever runs it: what Dossier keeps and for how long, what leaves your server and who receives it, and what deleting something removes. For how the data is protected, see [SECURITY.md](SECURITY.md).
 
-In short: everything you enter is kept in your own PostgreSQL database and data directory. What leaves your server goes to the AI provider and job source you choose, to Google if you connect Gmail and Calendar, to Hacker News and startups' own sites once you use Startups, to Anthropic through Claude if you turn on the Claude connector, plus an update check you can turn off and a daily usage ping, only if you agree to it. With a local model, your profile, postings and documents never leave your server. With a hosted one, keeping the database on your server covers only part of where your data goes.
+Saved data is kept in your own PostgreSQL database and data directory. Selected unsaved edits also have recovery copies in the current browser tab, as described below. What leaves your server goes to the AI provider and job source you choose, to Google if you connect Gmail and Calendar, to Hacker News and startups' own sites once you use Startups, to Anthropic through Claude if you turn on the Claude connector, plus an update check you can turn off and a daily usage ping, only if you agree to it. With a local model, your profile, postings and documents never leave your server. With a hosted one, keeping the database on your server covers only part of where your data goes.
 
 ## What Dossier keeps
 
@@ -26,6 +26,12 @@ In short: everything you enter is kept in your own PostgreSQL database and data 
 | Your answer to whether to send the usage ping, when you gave it and to which version of the question, the usage ping's random install ID and the day of the last ping, the latest release the update check found, your browser's time zone, so the inbox check reads times in it, and when you last opened Startups and what its last refresh found | Database | Delete everything |
 
 Exports you download and database dumps you take are copies outside Dossier's reach: keep them safe, and delete them yourself. Dossier logs errors without the data involved; what your server, Docker or reverse proxy log otherwise is up to your setup.
+
+### Browser recovery copies
+
+While an autosave is pending, this fork keeps an unencrypted recovery copy in that tab's `sessionStorage` for profile fields, application facts, the job-agent query and the document filename pattern. It includes the previous saved value so changes made elsewhere can be reviewed before replacement. Copies survive reloads and are removed after the server acknowledges the latest edit, when you choose the saved version during recovery, or when the tab session ends. **Delete everything** also clears these copies in the current tab; other open tabs and browser session-restoration features can retain their own copies.
+
+Passwords, API keys, Google credentials, connector credentials and AI-provider configuration are excluded from this recovery store. If browser storage is unavailable, the app warns you and still asks before reloading with outstanding writes. Wait for **Saved** before closing a tab or confirming that you want to leave. Browser recovery copies are not included in server backups or exports.
 
 ## What deleting removes
 
