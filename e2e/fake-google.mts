@@ -34,6 +34,7 @@ type FakeEvent = {
 const events = new Map<string, FakeEvent>();
 let eventCount = 0;
 let revoked = 0;
+let loseNextSendResponse = false;
 
 function send(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { "content-type": "application/json" });
@@ -99,6 +100,11 @@ createServer(async (request, response) => {
   // For specs: what the app sent and did.
   if (path === "/state") return send(response, 200, { sent, events: [...events.values()].filter((event) => event.status !== "cancelled"), revoked, granted });
 
+  if (path === "/test/lose-next-send-response" && request.method === "POST") {
+    loseNextSendResponse = true;
+    return send(response, 200, { ok: true });
+  }
+
   // For specs: changes made "in Google Calendar".
   const testEvent = /^\/test\/events(?:\/([^/]+))?$/.exec(path);
   if (testEvent) {
@@ -149,7 +155,7 @@ createServer(async (request, response) => {
     const id = `sent-${sent.length + 1}`;
     const threadId = body.threadId ?? `thread-${sent.length + 1}`;
     sent.push({ id, threadId, raw, text: textOf(raw), attachments: [...raw.matchAll(/filename="([^"]+)"/g)].map((match) => match[1]) });
-    deliver({ id, threadId, labels: ["SENT"], headers: { From: rawHeader(raw, "From"), To: rawHeader(raw, "To"), Subject: rawHeader(raw, "Subject") }, text: "" });
+    deliver({ id, threadId, labels: ["SENT"], headers: { From: rawHeader(raw, "From"), To: rawHeader(raw, "To"), Subject: rawHeader(raw, "Subject"), "Message-ID": rawHeader(raw, "Message-ID") }, text: textOf(raw) });
     // The first application gets an answer: an invitation with a question.
     if (sent.length === 1) {
       deliver({
@@ -166,10 +172,18 @@ createServer(async (request, response) => {
         text: "Hi Jane,\n\nThank you for applying! We'd like to invite you to a 45-minute call next week. Which times would work for you? Also, what is your notice period?\n\nBest,\nJohn",
       });
     }
+    if (loseNextSendResponse) {
+      loseNextSendResponse = false;
+      return response.destroy();
+    }
     return send(response, 200, { id, threadId, labelIds: ["SENT"] });
   }
   if (path === `${gmail}/profile`) return send(response, 200, { emailAddress: ACCOUNT, historyId: String(historyId) });
-  if (path === `${gmail}/messages`) return send(response, 200, { messages: [...mailbox].reverse().map(({ id, threadId }) => ({ id, threadId })), resultSizeEstimate: mailbox.length });
+  if (path === `${gmail}/messages`) {
+    const messageId = /rfc822msgid:(\S+)/.exec(url.searchParams.get("q") ?? "")?.[1];
+    const matching = messageId ? mailbox.filter(mail => mail.labels.includes("SENT") && mail.headers["Message-ID"] === messageId) : mailbox;
+    return send(response, 200, { messages: [...matching].reverse().map(({ id, threadId }) => ({ id, threadId })), resultSizeEstimate: matching.length });
+  }
   if (path === `${gmail}/history`) {
     const since = Number(url.searchParams.get("startHistoryId"));
     const added = mailbox.filter((mail) => mail.historyId > since);

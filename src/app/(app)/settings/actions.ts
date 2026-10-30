@@ -1,5 +1,7 @@
 "use server";
 
+import { assertNoPendingEmailSends, guardEmailSendHistory, PendingEmailSends } from "@/lib/google/send-guard";
+
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -241,12 +243,18 @@ export const startZippingPdfs = action(z.object({}), async () => {
  * session stays; the user lands on the empty dashboard.
  */
 export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }), async () => {
+  try { await assertNoPendingEmailSends(prisma); } catch (error) {
+    if (error instanceof PendingEmailSends) throw new ActionError(error.message);
+    throw error;
+  }
   const unfinished = await prisma.job.findMany({ where: { status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] } }, select: { id: true } });
   for (const job of unfinished) await cancelJob(job.id);
-  // Revokes Dossier's access at Google too (E15-1).
-  await disconnectGoogle().catch(() => {});
 
   await prisma.$transaction(async (tx) => {
+    try { await guardEmailSendHistory(tx); } catch (error) {
+      if (error instanceof PendingEmailSends) throw new ActionError(error.message);
+      throw error;
+    }
     await tx.careerIntake.deleteMany();
     await tx.careerArtifact.deleteMany();
     await tx.careerImport.deleteMany();
@@ -263,6 +271,7 @@ export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }
     await tx.startup.deleteMany();
     await tx.startupBlock.deleteMany();
     // Mail fetched from Gmail (E15-3).
+    await tx.emailSendIntent.deleteMany();
     await tx.emailMessage.deleteMany();
     // Applications take their history, documents, chat and notes along.
     await tx.application.deleteMany();
@@ -278,6 +287,8 @@ export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }
     await tx.theme.deleteMany({ where: { builtIn: false } });
     await tx.setting.deleteMany();
   });
+  // Keep the account available if the guarded data deletion was refused.
+  await disconnectGoogle().catch(() => {});
   // An empty profile and default settings need no rows; the built-in themes do.
   await seedBuiltIns(prisma);
   await Promise.all([deleteAllBackups(), deleteAllDownloads()]);

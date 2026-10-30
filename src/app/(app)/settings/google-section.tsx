@@ -42,7 +42,7 @@ export type GoogleClientView = {
 export type GoogleConnectionView =
   | { status: "not-configured" }
   | { status: "disconnected" }
-  | { status: "connected"; email: string; canSend: boolean; canRead: boolean; canUseCalendar: boolean; lastSync: string | null; syncProblem: string | null };
+  | { status: "connected"; email: string; canSend: boolean; sendDisabled?: boolean; canRead: boolean; canUseCalendar: boolean; lastSync: string | null; syncProblem: string | null };
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const INTERVALS = [5, 10, 15, 30, 60];
@@ -128,6 +128,7 @@ export function GoogleSection({
                 Disconnect
               </Button>
             </div>
+            {connection.sendDisabled && <p className="text-meta text-muted">Email sending is disabled on this instance. You can keep preparing drafts.</p>}
             <ul className="flex flex-col gap-1.5 text-meta text-muted">
               <Permission granted={connection.canSend} group="send" label="Send email from your address" />
               <Permission granted={connection.canRead} group="read" label="Read your mail, to find replies to your applications" />

@@ -9,7 +9,8 @@ import {
   loadFreeSlots,
   markHandled,
   rereadEmail,
-  sendReplyEmail,
+  prepareGmailReply,
+  confirmGmailSend,
   startDraftingReply,
 } from "@/lib/google/actions";
 import type { EmailView } from "@/lib/google/inbox-data";
@@ -17,13 +18,16 @@ import type { EmailView } from "@/lib/google/inbox-data";
 import { Conversation } from "./conversation";
 
 vi.mock("@/lib/google/actions", () => ({
+  inspectGmailSend: vi.fn(async () => ({ ok: true, data: null })),
   applySuggestedStatus: vi.fn(async () => ({ ok: true, data: { eventId: "ev" }, toast: "An interview! You've got this." })),
   confirmInterview: vi.fn(async () => ({ ok: true, data: { eventLink: null, eventId: null }, toast: "Interview added." })),
   loadFreeSlots: vi.fn(async () => ({ ok: true, data: { slots: [{ start: "2026-10-20T08:00:00.000Z", label: "Tue 20 Oct, 10:00–10:45" }, { start: "2026-10-21T12:00:00.000Z", label: "Wed 21 Oct, 14:00–14:45" }], timeZone: "Europe/Berlin", fromCalendar: true } })),
   markHandled: vi.fn(async () => ({ ok: true, data: null })),
   rereadEmail: vi.fn(async () => ({ ok: true, data: null })),
   saveReplyDraft: vi.fn(async () => ({ ok: true, data: null })),
-  sendReplyEmail: vi.fn(async () => ({ ok: true, data: null, toast: "Answer sent." })),
+  prepareGmailReply: vi.fn(async ({ body }: { body: string }) => ({ ok: true, data: { id: "12345678-1234-4234-8234-123456789012", state: "PREPARED", from: "jane@gmail.com", to: "a.keller@northwind.example", subject: "Re: Application", body, attachments: [] } })),
+  confirmGmailSend: vi.fn(async () => ({ ok: true, data: { review: { id: "12345678-1234-4234-8234-123456789012", state: "SENT", from: "jane@gmail.com", to: "a.keller@northwind.example", subject: "Re: Application", body: "Hi Anna, Tuesday works.", attachments: [] }, eventId: null }, toast: "Answer sent." })),
+  checkGmailSend: vi.fn(),
   startDraftingReply: vi.fn(async () => ({ ok: true, data: "job-1" })),
 }));
 const router = vi.hoisted(() => ({ refresh: vi.fn() }));
@@ -62,7 +66,7 @@ const email = (extra: Partial<EmailView> = {}): EmailView => ({
 
 beforeEach(() => {
   vi.mocked(toast).mockClear();
-  vi.mocked(sendReplyEmail).mockClear();
+  vi.mocked(confirmGmailSend).mockClear();
   router.refresh.mockClear();
 });
 
@@ -96,8 +100,9 @@ describe("Conversation (E15-3, E15-4)", () => {
     await user.clear(answer);
     await user.type(answer, "Hi Anna, Tuesday works.");
     await user.click(screen.getByRole("button", { name: "Review and send" }));
-    await user.click(screen.getByRole("button", { name: "Send now" }));
-    expect(sendReplyEmail).toHaveBeenCalledWith({ emailId: "e1", body: "Hi Anna, Tuesday works." });
+    await user.click(await screen.findByRole("button", { name: "Send now" }));
+    expect(prepareGmailReply).toHaveBeenCalledWith({ emailId: "e1", body: "Hi Anna, Tuesday works." });
+    expect(confirmGmailSend).toHaveBeenCalledWith({ intentId: "12345678-1234-4234-8234-123456789012" });
   });
 
   it("offers to add an agreed interview", async () => {
@@ -129,4 +134,11 @@ describe("Conversation (E15-3, E15-4)", () => {
     await user.click(first);
     expect(screen.getByText("I'm applying.")).toBeInTheDocument();
   });
+});
+
+
+it("leaves reply drafting available while sending is disabled", () => {
+  render(<Conversation emails={[email({ replyDraft: "Synthetic answer." })]} aiReady sendDisabled />);
+  expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("Synthetic answer.");
+  expect(screen.getByRole("button", { name: "Email sending disabled" })).toBeDisabled();
 });

@@ -1,12 +1,12 @@
 "use client";
 
-import { AlertDialog } from "radix-ui";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { use, useEffect, useState, useTransition, type ReactNode } from "react";
 
+import { PendingSavesContext } from "@/components/save-boundary";
 import { toastWithUndo } from "@/components/change-status";
 import { toast, toastResult } from "@/components/toast";
-import { Button, buttonClassName } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { ReplyKind } from "@/generated/prisma/enums";
 import { useJob } from "@/hooks/use-job";
@@ -18,9 +18,14 @@ import {
   markHandled,
   rereadEmail,
   saveReplyDraft,
-  sendReplyEmail,
+  prepareGmailReply,
+  confirmGmailSend,
+  checkGmailSend,
+  inspectGmailSend,
   startDraftingReply,
 } from "@/lib/google/actions";
+import { SendReviewDialog } from "@/components/email/send-review";
+import type { SendReview } from "@/lib/google/send-intent";
 import type { EmailView } from "@/lib/google/inbox-data";
 import type { DraftReplyResult } from "@/lib/jobs/draft-reply";
 import { statusInfo } from "@/lib/status";
@@ -43,20 +48,20 @@ export function formatWhen(date: Date, timeZone?: string): string {
 }
 
 /** Every message of a conversation; the newest unanswered reply opens with its answer. */
-export function Conversation({ emails, aiReady, timeZone }: { emails: EmailView[]; aiReady: boolean; timeZone?: string }) {
+export function Conversation({ emails, aiReady, timeZone, sendDisabled = false }: { emails: EmailView[]; aiReady: boolean; timeZone?: string; sendDisabled?: boolean }) {
   const latestOpen = [...emails].reverse().find((email) => email.direction === "INCOMING" && !email.handled)?.id;
   return (
     <ol className="flex flex-col gap-3">
       {emails.map((email) => (
         <li key={email.id}>
-          <Message email={email} aiReady={aiReady} timeZone={timeZone} initiallyOpen={email.id === latestOpen || emails.length === 1} />
+          <Message email={email} aiReady={aiReady} timeZone={timeZone} sendDisabled={sendDisabled} initiallyOpen={email.id === latestOpen || emails.length === 1} />
         </li>
       ))}
     </ol>
   );
 }
 
-function Message({ email, aiReady, timeZone, initiallyOpen }: { email: EmailView; aiReady: boolean; timeZone?: string; initiallyOpen: boolean }) {
+function Message({ email, aiReady, timeZone, initiallyOpen, sendDisabled }: { email: EmailView; aiReady: boolean; timeZone?: string; initiallyOpen: boolean; sendDisabled: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
   const outgoing = email.direction === "OUTGOING";
   const who = outgoing ? "You" : email.fromName || email.fromAddress;
@@ -85,7 +90,7 @@ function Message({ email, aiReady, timeZone, initiallyOpen }: { email: EmailView
         <div className="flex flex-col gap-4 px-6 pb-5">
           {email.subject && <p className="text-meta text-muted">{email.subject}</p>}
           <div className="text-field leading-[1.6] break-words whitespace-pre-wrap">{email.body || <span className="text-muted">No text.</span>}</div>
-          {!outgoing && <Reading email={email} aiReady={aiReady} timeZone={timeZone} />}
+          {!outgoing && <Reading email={email} aiReady={aiReady} timeZone={timeZone} sendDisabled={sendDisabled} />}
         </div>
       )}
     </article>
@@ -99,7 +104,7 @@ function KindChip({ kind }: { kind: ReplyKind }) {
 }
 
 /** What the AI read in a reply, its suggested status and interview time, and the answer. */
-function Reading({ email, aiReady, timeZone }: { email: EmailView; aiReady: boolean; timeZone?: string }) {
+function Reading({ email, aiReady, timeZone, sendDisabled }: { email: EmailView; aiReady: boolean; timeZone?: string; sendDisabled: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const run = (work: () => Promise<void>) => startTransition(work);
@@ -160,7 +165,7 @@ function Reading({ email, aiReady, timeZone }: { email: EmailView; aiReady: bool
       </Panel>
       {email.confirmedAt && email.application && <InterviewConfirm email={email} timeZone={timeZone} />}
       {!email.handled ? (
-        <ReplyDraft email={email} aiReady={aiReady} />
+        <ReplyDraft email={email} aiReady={aiReady} sendDisabled={sendDisabled} />
       ) : (
         <p className="text-meta text-muted">
           {email.kind === "ACKNOWLEDGEMENT" || email.kind === "REJECTION" ? "No answer needed." : "Answered."}{" "}
@@ -218,7 +223,8 @@ function InterviewConfirm({ email, timeZone }: { email: EmailView; timeZone?: st
 type Slot = { start: string; label: string };
 
 /** The drafted answer: free times to pick, gaps to fill, a note to the AI, and Send. */
-function ReplyDraft({ email, aiReady }: { email: EmailView; aiReady: boolean }) {
+function ReplyDraft({ email, aiReady, sendDisabled }: { email: EmailView; aiReady: boolean; sendDisabled: boolean }) {
+  const saves = use(PendingSavesContext);
   const router = useRouter();
   const [body, setBody] = useState(email.replyDraft);
   // Once there's a draft, the box stays, even emptied.
@@ -229,8 +235,18 @@ function ReplyDraft({ email, aiReady }: { email: EmailView; aiReady: boolean }) 
   const [slots, setSlots] = useState<Slot[] | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [confirming, setConfirming] = useState(false);
+  const [review, setReview] = useState<SendReview | null>(null);
   const [pending, startTransition] = useTransition();
   const wantsSlots = email.kind === "INTERVIEW" && !email.confirmedAt;
+
+  const uncertainSend = review && ["SENDING", "UNKNOWN"].includes(review.state);
+  useEffect(() => {
+    let active = true;
+    void inspectGmailSend({ kind: "REPLY", targetId: email.id }).then(result => {
+      if (active && result.ok && result.data && ["SENDING", "UNKNOWN"].includes(result.data.state)) setReview(current => current ?? result.data);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [email.id]);
 
   // Free times, when they ask to meet.
   useEffect(() => {
@@ -270,13 +286,25 @@ function ReplyDraft({ email, aiReady }: { email: EmailView; aiReady: boolean }) 
       setJob(result.data);
     });
 
-  const send = () =>
-    startTransition(async () => {
-      setConfirming(false);
-      const result = await sendReplyEmail({ emailId: email.id, body });
-      if (!toastResult(result).ok) return;
-      router.refresh();
-    });
+  const prepare = (resend = false) => startTransition(async () => {
+    if (saves && !await saves.flush()) return toast("Save your changes before reviewing the email.");
+    const result = await prepareGmailReply({ emailId: email.id, body, ...(resend ? { resend: true } : {}) }).catch(() => ({ ok: false as const, error: "Could not prepare the email. Try again." }));
+    if (!result.ok) return toast(result.error);
+    setReview(result.data);
+    setConfirming(true);
+  });
+  const send = (check = false) => startTransition(async () => {
+    if (!review) return;
+    const result = await (check ? checkGmailSend : confirmGmailSend)({ intentId: review.id }).catch(() => ({ ok: false as const, error: "The result could not be confirmed. Check send status before trying again." }));
+    if (!result.ok) {
+      setReview({ ...review, state: "UNKNOWN" });
+      return toast(result.error);
+    }
+    setReview(result.data.review);
+    toastResult(result);
+    if (result.data.review.state === "SENT") setConfirming(false);
+    router.refresh();
+  });
 
   const skip = () =>
     startTransition(async () => {
@@ -372,35 +400,21 @@ function ReplyDraft({ email, aiReady }: { email: EmailView; aiReady: boolean }) 
         </Button>
         <Button
           className="ml-auto"
-          aria-disabled={busy || !body.trim() || undefined}
+          disabled={sendDisabled && !uncertainSend}
+          aria-disabled={busy || (!body.trim() && !uncertainSend) || undefined}
           onClick={() => {
-            if (busy || !body.trim()) return;
+            if (busy) return;
+            if (uncertainSend) return setConfirming(true);
+            if (!body.trim()) return;
             if (missing) return toast("Fill in the parts marked […] first.");
-            setConfirming(true);
+            prepare();
           }}
         >
-          Review and send
+          {uncertainSend ? "Review send status" : sendDisabled ? "Email sending disabled" : "Review and send"}
         </Button>
       </div>
 
-      <AlertDialog.Root open={confirming} onOpenChange={setConfirming}>
-        <AlertDialog.Portal>
-          <AlertDialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
-          <AlertDialog.Content className="fixed top-1/2 left-1/2 z-50 flex max-h-[85vh] w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-dialog border border-line-popover bg-card p-6 shadow-menu">
-            <AlertDialog.Title className="font-serif text-[22px] leading-tight">Send your answer?</AlertDialog.Title>
-            <AlertDialog.Description className="text-sm text-muted">
-              To {email.fromName ? `${email.fromName} <${email.fromAddress}>` : email.fromAddress}, in the same thread. This can&apos;t be unsent.
-            </AlertDialog.Description>
-            <div className="min-h-0 overflow-auto rounded-control border border-line bg-canvas px-4 py-3 text-control leading-[1.6] whitespace-pre-wrap">{body}</div>
-            <div className="mt-2 flex justify-end gap-2">
-              <AlertDialog.Cancel className={buttonClassName("secondary", "sm")}>Cancel</AlertDialog.Cancel>
-              <AlertDialog.Action className={buttonClassName("primary", "sm", "hover:text-on-primary")} onClick={send}>
-                Send now
-              </AlertDialog.Action>
-            </div>
-          </AlertDialog.Content>
-        </AlertDialog.Portal>
-      </AlertDialog.Root>
+      <SendReviewDialog review={review} title="Send your answer?" open={confirming} busy={pending} onOpenChange={setConfirming} onConfirm={() => send()} onCheck={() => send(true)} onResend={() => prepare(true)} />
     </section>
   );
 }

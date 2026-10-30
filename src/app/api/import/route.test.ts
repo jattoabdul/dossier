@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getSession } from "@/lib/auth/session";
 import { writeBackup } from "@/lib/backups";
+import { assertNoPendingEmailSends, PendingEmailSends } from "@/lib/google/send-guard";
 import { importExport, parseExport } from "@/lib/data-import";
 
 import { POST } from "./route";
@@ -13,6 +14,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: { job: { findMany: vi.fn(async () => []
 vi.mock("@/lib/jobs/runner", () => ({ cancelJob: vi.fn() }));
 vi.mock("@/lib/backups", () => ({ writeBackup: vi.fn(async () => "dossier-backup-before-import-2026-09-28-120000.json") }));
 const summary = { applications: 2, roles: 3, skills: 7, themes: 0, notes: 1 };
+vi.mock("@/lib/google/send-guard", async importOriginal => ({ ...(await importOriginal<typeof import("@/lib/google/send-guard")>()), assertNoPendingEmailSends: vi.fn(async () => {}) }));
 vi.mock("@/lib/data-import", () => ({
   parseExport: vi.fn(() => ({ ok: true, data: { exportedAt: new Date("2026-09-27T10:00:00Z") } })),
   summarizeExport: vi.fn(() => summary),
@@ -73,4 +75,20 @@ describe("POST /api/import (E10-6)", () => {
     vi.mocked(getSession).mockResolvedValue(null);
     expect((await post()).status).toBe(401);
   });
+});
+
+it("refuses a pending-send replacement before backup or import", async () => {
+  vi.mocked(assertNoPendingEmailSends).mockRejectedValueOnce(new PendingEmailSends());
+  const response = await post();
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ error: expect.stringContaining("pending email sends") });
+  expect(writeBackup).not.toHaveBeenCalled();
+  expect(importExport).not.toHaveBeenCalled();
+});
+
+it("reports a send claimed between preflight and the import transaction", async () => {
+  vi.mocked(importExport).mockRejectedValueOnce(new PendingEmailSends());
+  const response = await post();
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ error: expect.stringContaining("pending email sends") });
 });

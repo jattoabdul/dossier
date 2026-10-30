@@ -127,9 +127,6 @@ export function EmailTab({
           <SendWithGmail
             applicationId={applicationId}
             sender={gmail.sender}
-            to={to}
-            subject={subject}
-            attachments={[attachments.resume, attachments.letter].filter((name): name is string => name !== null)}
             sentBefore={gmail.sentBefore}
           />
         )}
