@@ -34,6 +34,9 @@ test("duplicates, exports, deletes and imports a theme", async ({ page }) => {
   await page.getByRole("button", { name: `Delete ${original} copy…` }).click();
   const dialog = page.getByRole("alertdialog", { name: `Delete “${original} copy”?` });
   await expect(dialog).toContainText("No application uses it.");
+  // Server-action revalidation can stream the title after the dialog content.
+  // Audit the settled document; a missing title must still fail this assertion.
+  await expect(page).toHaveTitle("Base resume · Dossier");
   const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
   expect(violations.filter((violation) => violation.impact === "serious" || violation.impact === "critical")).toEqual([]);
   await dialog.getByRole("button", { name: "Delete theme" }).click();
