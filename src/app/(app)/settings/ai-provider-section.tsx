@@ -75,7 +75,7 @@ export function AiProviderSection({ initial }: { initial: AiSettingsView }) {
   const fields = useMemo(() => ({ provider, baseUrl, model }), [provider, baseUrl, model]);
   const savedServer = useRef(`${initial.provider} ${initial.baseUrl}`);
   const { flush } = useAutosave(fields, async (value) => {
-    const result = await track(saveAiProvider(value));
+    const result = await saveAiProvider(value);
     if (result.ok) {
       setKeyState(result.data.keyState);
       // A different server may offer different models.

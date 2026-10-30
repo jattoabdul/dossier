@@ -2,6 +2,14 @@
 
 Next.js 16 (App Router) + Prisma 7 + PostgreSQL 18, run with Docker Compose and Yarn 4. Nothing runs on the host: every command goes through the containers. For installing and running Dossier, see the [README](README.md); for how it's secured, [SECURITY.md](SECURITY.md).
 
+## Autosave and navigation
+
+`useAutosave` owns debounce, serialized writes, retry and an awaitable queue drain. It reports the full lifecycle to the page tracker; do not wrap its save callback in `useTrackSave`. Reserve that wrapper for immediate actions, with distinct keys for independent operations in one caller. The app's `SaveBoundary` waits before links, form submissions and supported browser-history navigation, while reload/close guards cover outstanding writes.
+
+Recovery is explicit per field: supply a stable resource key, a readable label and a restore callback as the hook's fourth argument. Only approved non-credential values may use it. A same-tab copy is cleared after the final acknowledgement; a different server value requires review. Collapsed profile cards with drafts stay mounted for recovery, and other sections expose a review link. See `PRIVACY.md` for retention and browser limitations.
+
+Run the autosave, publication and reorder browser specs against the isolated end-to-end database. Their checks cover delayed writes, blur normalization, interrupted reloads, back/forward, failed saves, conflict review and server acknowledgement before **Saved**. Personal databases must never be used for these tests.
+
 ## Getting started
 
 ```bash

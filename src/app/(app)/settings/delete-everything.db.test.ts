@@ -58,7 +58,7 @@ afterAll(async () => {
 });
 
 describe("deleteEverything (E10-8)", () => {
-  it("wipes all user data and the backups, keeps the built-in themes, and lands on the dashboard", async () => {
+  it("wipes all user data and the backups, keeps the built-in themes, and acknowledges completion", async () => {
     // A saved posting from Find jobs goes too (E14-9).
     await prisma().posting.create({ data: { source: "JSEARCH", externalId: "job-1", savedAt: new Date() } });
     await prisma().postingSearch.create({ data: { source: "JSEARCH", query: {}, postings: [] } });
@@ -71,8 +71,7 @@ describe("deleteEverything (E10-8)", () => {
     // A posting pasted for Claude chat, and the connector, which goes off (#221).
     await prisma().claudePaste.create({ data: { text: "A posting", expiresAt: new Date(Date.now() + 60_000) } });
     await prisma().setting.create({ data: { key: "connectorEnabledAt", value: "2026-10-23T09:00:00.000Z" } });
-    await expect(deleteEverything({ confirm: "DELETE" })).rejects.toThrow("NEXT_REDIRECT");
-    expect(redirected.to).toBe("/");
+    await expect(deleteEverything({ confirm: "DELETE" })).resolves.toEqual({ ok: true, data: null });
     const counts = await Promise.all([
       prisma().posting.count(),
       prisma().postingSearch.count(),

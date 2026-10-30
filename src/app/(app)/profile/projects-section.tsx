@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 
-import { useTrackSave } from "@/components/save-tracker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,14 +33,15 @@ function ProjectForm({
   onChange: (entry: ProjectItem) => void;
   autoFocus: boolean;
 }) {
-  const track = useTrackSave();
   // Autosave the text and dates only; skill links save on their own when toggled.
   const { id, name, link, bullets, startYear, startMonth, endYear, endMonth, current } = entry;
   const fields = useMemo(
     () => ({ id, name, link, bullets, startYear, startMonth, endYear, endMonth, current }),
     [id, name, link, bullets, startYear, startMonth, endYear, endMonth, current],
   );
-  const { flush } = useAutosave(fields, (value) => track(saveProject(value)));
+  const { flush } = useAutosave(fields, saveProject, 500, {
+    key: `project:${entry.id}`, label: "Project", restore: (recovered) => onChange({ ...entry, ...recovered }),
+  });
   const set = (change: Partial<ProjectItem>) => onChange({ ...entry, ...change });
 
   return (

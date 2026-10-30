@@ -1,5 +1,7 @@
 "use client";
 
+import { clearAllAutosaveDrafts } from "@/lib/autosave-draft";
+
 import { useRouter } from "next/navigation";
 import { useRef, useState, type ReactNode } from "react";
 
@@ -318,6 +320,7 @@ const CONFIRMATION = "DELETE";
 
 /** "Delete everything" (E10-8, SET-11): typed confirmation, then gone for good. */
 function DangerZone() {
+  const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -326,10 +329,11 @@ function DangerZone() {
   const deleteAll = async () => {
     if (!ready) return toast("Type DELETE in capitals to confirm.");
     setDeleting(true);
-    // On success the action takes you to the empty dashboard.
     const result = await deleteEverything({ confirm: CONFIRMATION });
     setDeleting(false);
-    if (result && !result.ok) toast(result.error);
+    if (!result.ok) return toast(result.error);
+    clearAllAutosaveDrafts();
+    router.replace("/");
   };
 
   return (

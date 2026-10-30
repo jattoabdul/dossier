@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 
+import { PendingSavesContext } from "./save-boundary";
 import { useTrackSave } from "@/components/save-tracker";
 import { toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ export function FactList({
   placeholder: string;
 }) {
   const track = useTrackSave();
+  const saves = use(PendingSavesContext);
   const [adding, setAdding] = useState(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
@@ -48,6 +50,7 @@ export function FactList({
   }
 
   async function remove(fact: FactItem) {
+    if (saves && !(await saves.flush())) return;
     const index = facts.findIndex((entry) => entry.id === fact.id);
     const putBack = (restored: FactItem) =>
       setFacts(() => latest.current.toSpliced(Math.min(index, latest.current.length), 0, restored));
@@ -79,6 +82,7 @@ export function FactList({
           {facts.map((fact, index) => (
             <FactRow
               key={fact.id}
+              recoveryKey={applicationId ? `application:${applicationId}:fact:${fact.id}` : `fact:${fact.id}`}
               fact={fact}
               number={index + 1}
               placeholder={placeholder}
@@ -99,6 +103,7 @@ export function FactList({
 }
 
 function FactRow({
+  recoveryKey,
   fact,
   number,
   placeholder,
@@ -106,6 +111,7 @@ function FactRow({
   onChange,
   onRemove,
 }: {
+  recoveryKey: string;
   fact: FactItem;
   number: number;
   placeholder: string;
@@ -113,8 +119,9 @@ function FactRow({
   onChange: (text: string) => void;
   onRemove: () => void;
 }) {
-  const track = useTrackSave();
-  const { flush } = useAutosave(fact, (value) => track(saveFact(value)));
+  const { flush } = useAutosave(fact, saveFact, 500, {
+    key: recoveryKey, label: `Fact ${number}`, restore: (recovered) => onChange(recovered.text),
+  });
   return (
     <li className="flex items-start gap-3">
       <textarea

@@ -6,7 +6,6 @@ import type { ProfileData, ReferenceItem } from "@/lib/profile";
 
 import { createReference, removeReference, restoreReference, saveReference } from "./actions";
 import { EntryList } from "./entry-list";
-import { useTrackSave } from "@/components/save-tracker";
 import type { UpdateProfile } from "./skills-section";
 
 function ReferenceForm({
@@ -18,8 +17,9 @@ function ReferenceForm({
   onChange: (entry: ReferenceItem) => void;
   autoFocus: boolean;
 }) {
-  const track = useTrackSave();
-  const { flush } = useAutosave(entry, (value) => track(saveReference(value)));
+  const { flush } = useAutosave(entry, saveReference, 500, {
+    key: `reference:${entry.id}`, label: "Reference", restore: onChange,
+  });
   const set = (change: Partial<ReferenceItem>) => onChange({ ...entry, ...change });
 
   return (

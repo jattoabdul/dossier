@@ -148,6 +148,7 @@ export function EntryList<T extends { id: string }>({
   const cards = items.map((item, index) => {
     const card = (reorder?: Reorder) => (
       <EntryCard
+        draftId={item.id}
         {...summary(item)}
         open={openId === item.id}
         onToggle={() => setOpenId((current) => (current === item.id ? null : item.id))}

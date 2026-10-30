@@ -64,7 +64,9 @@ export function AgentSection({
       if (!toastResult(result).ok) setSettings(previous);
     });
   };
-  const { flush } = useAutosave(settings.query, (query) => track(saveAgentSettings({ query })));
+  const { flush } = useAutosave(settings.query, (query) => saveAgentSettings({ query }), 500, {
+    key: "settings:agent-query", label: "Job search", restore: (query) => setSettings((current) => ({ ...current, query })),
+  });
   const setQuery = (patch: Partial<SearchQuery>) => {
     setErrors({});
     setSettings((current) => ({ ...current, query: { ...current.query, ...patch } }));

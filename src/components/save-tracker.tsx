@@ -1,49 +1,68 @@
 "use client";
 
-import { createContext, use, useCallback, useState } from "react";
-
+import { createContext, use, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { AutosaveStatus } from "@/hooks/use-autosave";
+import { PendingSavesContext } from "./save-boundary";
+import { autosaveDraftSnapshot, emptyDraftSnapshot, subscribeAutosaveDrafts } from "@/lib/autosave-draft";
 
-type Track = <T>(save: Promise<T>) => Promise<T>;
+type Track = {
+  <T>(save: Promise<T>, key?: unknown): Promise<T>;
+  report?: (key: unknown, status: AutosaveStatus, savedAt?: Date) => void;
+};
 
-/** Reports a save to the page's saved indicator. */
 export const TrackSaveContext = createContext<Track>((save) => save);
 
-/** Wraps a save (an autosave or an immediate action) so the header's indicator shows it. */
+/** Immediate actions share a retry identity per caller; independent fields can supply a key. */
 export function useTrackSave(): Track {
-  return use(TrackSaveContext);
+  const track = use(TrackSaveContext);
+  const [identity] = useState(() => ({}));
+  return useCallback(<T,>(save: Promise<T>, key: unknown = identity) => track(save, key), [track, identity]);
 }
 
 const failed = (result: unknown) =>
   typeof result === "object" && result !== null && "ok" in result && result.ok === false;
 
-/**
- * One "Saving… / Saved just now / Couldn't save" status for a page with many
- * independent saves: saving while any is in flight, otherwise the outcome of
- * the last one.
- */
+/** A page is saved only when every autosaver and immediate request has settled successfully. */
 export function useSaveTracker(): { status: AutosaveStatus; savedAt: Date | null; track: Track } {
+  const boundary = use(PendingSavesContext);
+  const drafts = useSyncExternalStore(subscribeAutosaveDrafts, autosaveDraftSnapshot, emptyDraftSnapshot);
   const [pending, setPending] = useState(0);
-  const [last, setLast] = useState<{ status: AutosaveStatus; savedAt: Date | null }>({
-    status: "idle",
-    savedAt: null,
-  });
-
-  const track = useCallback<Track>(async (save) => {
-    setPending((count) => count + 1);
-    try {
-      const result = await save;
-      setLast((previous) =>
-        failed(result) ? { ...previous, status: "error" } : { status: "saved", savedAt: new Date() },
-      );
-      return result;
-    } catch (error) {
-      setLast((previous) => ({ ...previous, status: "error" }));
-      throw error;
-    } finally {
-      setPending((count) => count - 1);
-    }
+  const [states, setStates] = useState(() => new Map<unknown, AutosaveStatus>());
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const versions = useRef(new Map<unknown, object>());
+  const report = useCallback((key: unknown, status: AutosaveStatus, date?: Date) => {
+    setStates((previous) => new Map(previous).set(key, status));
+    if (date) setSavedAt(date);
   }, []);
-
-  return { status: pending > 0 ? "saving" : last.status, savedAt: last.savedAt, track };
+  const track = useMemo<Track>(() => {
+    const run: Track = async (save, key = {}) => {
+      const version = {};
+      versions.current.set(key, version);
+      setPending((count) => count + 1);
+      report(key, "saving");
+      let active = true;
+      const detach = boundary?.register({
+        isDirty: () => active,
+        flush: () => save.then((result) => !failed(result), () => false),
+      });
+      try {
+        const result = await save;
+        if (versions.current.get(key) === version) report(key, failed(result) ? "error" : "saved", failed(result) ? undefined : new Date());
+        return result;
+      } catch (error) {
+        if (versions.current.get(key) === version) report(key, "error");
+        throw error;
+      } finally {
+        active = false;
+        detach?.();
+        setPending((count) => count - 1);
+      }
+    };
+    run.report = report;
+    return run;
+  }, [boundary, report]);
+  const values = [...states.values()];
+  const status = pending > 0 || values.includes("saving") ? "saving"
+    : values.includes("error") ? "error" : drafts !== "[]" ? "pending" : savedAt ? "saved" : "idle";
+  return { status, savedAt, track };
 }

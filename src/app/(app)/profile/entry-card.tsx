@@ -1,6 +1,8 @@
 "use client";
 
-import { useId, type ComponentProps, type ReactNode } from "react";
+import { use, useId, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
+import { PendingSavesContext } from "@/components/save-boundary";
+import { autosaveDraftKeys, subscribeAutosaveDrafts } from "@/lib/autosave-draft";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
@@ -59,6 +61,7 @@ export function EntryCard({
   onRemove,
   reorder,
   children,
+  draftId,
 }: {
   title: string;
   subtitle: string;
@@ -71,8 +74,17 @@ export function EntryCard({
   /** A drag handle and Move up/down buttons, where entries can be reordered (E4-9). */
   reorder?: Reorder;
   children: ReactNode;
+  draftId?: string;
 }) {
   const bodyId = useId();
+  const saves = use(PendingSavesContext);
+  const hasDraft = useSyncExternalStore(subscribeAutosaveDrafts,
+    () => Boolean(draftId && autosaveDraftKeys().some((key) => key.endsWith(`:${draftId}`))), () => false);
+  const afterSaving = async (action: () => void) => {
+    if (!saves?.isDirty()) return action();
+    await Promise.resolve(); // Include the field's blur normalization.
+    if (await saves.flush()) action();
+  };
   return (
     <div
       className={cn(
@@ -86,7 +98,7 @@ export function EntryCard({
           type="button"
           aria-expanded={open}
           aria-controls={bodyId}
-          onClick={onToggle}
+          onClick={() => !open && hasDraft ? onToggle() : void afterSaving(onToggle)}
           className={cn(
             "flex min-w-0 flex-1 items-baseline gap-4 py-5 pr-6 text-left focus-visible:-outline-offset-2",
             reorder ? "pl-3" : "pl-6",
@@ -111,14 +123,14 @@ export function EntryCard({
           </span>
         )}
       </div>
-      {open && (
-        <div id={bodyId} className="flex flex-col gap-5 border-t border-line px-6 pt-[22px] pb-6">
+      {(open || hasDraft) && (
+        <div id={bodyId} className={cn(open ? "flex" : "hidden", "flex-col gap-5 border-t border-line px-6 pt-[22px] pb-6")}>
           {children}
           <div className="flex items-center justify-between">
-            <Button variant="danger-text" size="sm" onClick={onRemove}>
+            <Button variant="danger-text" size="sm" onClick={() => void afterSaving(onRemove)}>
               Remove
             </Button>
-            <Button variant="secondary" size="sm" className="bg-input" onClick={onToggle}>
+            <Button variant="secondary" size="sm" className="bg-input" onClick={() => void afterSaving(onToggle)}>
               Done
             </Button>
           </div>

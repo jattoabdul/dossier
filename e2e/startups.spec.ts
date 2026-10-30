@@ -16,6 +16,8 @@ async function expectAccessible(page: Page) {
 }
 
 test("finds hiring startups with the addresses they publish, and leaves alone what it should", async ({ page }) => {
+  // Audit the toast's readable state instead of a frame halfway through its entrance animation.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/startups");
   await expect(page.getByRole("note")).toContainText("Press Refresh to look for startups.");
   await page.getByRole("button", { name: "Refresh" }).click();

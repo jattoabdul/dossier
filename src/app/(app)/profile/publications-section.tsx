@@ -3,7 +3,6 @@
 import { useId, useLayoutEffect, useRef, type KeyboardEvent } from "react";
 
 import { CitationText } from "@/components/citation";
-import { useTrackSave } from "@/components/save-tracker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useAutosave } from "@/hooks/use-autosave";
@@ -111,8 +110,9 @@ function PublicationForm({
   onChange: (entry: PublicationItem) => void;
   autoFocus: boolean;
 }) {
-  const track = useTrackSave();
-  const { flush } = useAutosave(entry, (value) => track(savePublication(value)));
+  const { flush } = useAutosave(entry, savePublication, 500, {
+    key: `publication:${entry.id}`, label: "Publication", restore: onChange,
+  });
   const set = (change: Partial<PublicationItem>) => onChange({ ...entry, ...change });
 
   return (

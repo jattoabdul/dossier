@@ -20,7 +20,6 @@ import {
 } from "./actions";
 import { EntryList } from "./entry-list";
 import { MonthYearField } from "./month-year-field";
-import { useTrackSave } from "@/components/save-tracker";
 import type { UpdateProfile } from "./skills-section";
 import { SkillsUsed } from "./skills-used";
 
@@ -34,14 +33,15 @@ function ExperienceForm({
   onChange: (entry: ExperienceItem) => void;
   autoFocus: boolean;
 }) {
-  const track = useTrackSave();
   // Autosave the text and dates only; skill links save on their own when toggled.
   const { id, role, company, location, descriptor, bullets, startYear, startMonth, endYear, endMonth, current } = entry;
   const fields = useMemo(
     () => ({ id, role, company, location, descriptor, bullets, startYear, startMonth, endYear, endMonth, current }),
     [id, role, company, location, descriptor, bullets, startYear, startMonth, endYear, endMonth, current],
   );
-  const { flush } = useAutosave(fields, (value) => track(saveExperience(value)));
+  const { flush } = useAutosave(fields, saveExperience, 500, {
+    key: `experience:${entry.id}`, label: "Experience", restore: (recovered) => onChange({ ...entry, ...recovered }),
+  });
   const set = (change: Partial<ExperienceItem>) => onChange({ ...entry, ...change });
 
   return (

@@ -31,11 +31,9 @@ test("adds a publication with italics and a DOI, and shows it on the base resume
   await expect(page.getByLabel(/^Link/)).toHaveValue("https://doi.org/10.5555/98765");
   await expect(page.getByText("Saved just now")).toBeVisible();
 
-  // The page-wide indicator can describe an earlier save while the link's
-  // blur normalization is still debounced. Reload only after this edit commits.
+  // Saved must include the blur-normalized link. Check immediately, without polling.
   const savedCitation = "Doe, J. (2024). Calm payouts. *Journal of Studies*, 12(3), 45–67.";
-  await expect
-    .poll(() => sql(`SELECT citation, link FROM "Publication" WHERE citation = $1`, [savedCitation]))
+  expect(await sql(`SELECT citation, link FROM "Publication" WHERE citation = $1`, [savedCitation]))
     .toEqual([{ citation: savedCitation, link: "https://doi.org/10.5555/98765" }]);
 
   await page.reload();
