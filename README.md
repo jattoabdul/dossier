@@ -27,6 +27,8 @@ It's for one person on a small server: one password, your data in your own Postg
 
 This fork incorporates upstream Dossier 1.10.0 with a local Codex connector, a read-only career source library, reviewed imports, and additional credential, backup and inbox protections. See [local personal setup](docs/LOCAL_PERSONAL.md) or [the synthetic demo](docs/LOCAL_DEMO.md). Runtime configuration, source documents, import inputs and private evaluation notes stay outside Git. The upstream project and AGPL license are retained.
 
+Automatic container publishing and tagged releases are disabled by default. Both publishing jobs require the repository Actions variable `DOSSIER_AUTOMATIC_IMAGE_PUBLISH` to be exactly `true`; keep it unset or `false` for local use. CI checks continue to run independently. Enabling this variable permits later main pushes and version tags to publish images, so review that change separately.
+
 ## Demo
 
 ![Dossier in use: the dashboard, dragging a card on the board, a new application from a pasted posting, refining the tailored resume in the chat, the cover letter, and switching resume themes](.github/images/demo.gif)

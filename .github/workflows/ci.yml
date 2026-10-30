@@ -16,7 +16,7 @@ concurrency:
 jobs:
   # On main, a pull request's merge commit holds exactly the code its pull
   # request's run checked when its tree is the branch head's (the branch was
-  # up to date with main). Then main only builds the image. Anything else
+  # up to date with main). Then main reuses those checks. Anything else
   # pushed to main is checked in full: direct pushes, merges of a branch that
   # was behind, and publishes to the public repository.
   checked:
@@ -46,7 +46,7 @@ jobs:
           fi
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
           if [ "$skip" = true ]; then
-            echo "Same code as $head, which passed CI in its pull request: only the image is built." >> "$GITHUB_STEP_SUMMARY"
+            echo "Same code as $head, which passed CI in its pull request: reusing the successful checks." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   check:
@@ -167,11 +167,12 @@ jobs:
 
   # After both checks pass on main, or when its pull request passed them: the
   # production image on GHCR, tagged with the commit SHA (and "main"). A
-  # version tag then tags it with the version.
+  # version tag then tags it with the version. Publishing is off unless the
+  # repository owner explicitly opts in with this Actions variable.
   image:
     name: Production image
     needs: [checked, check, e2e]
-    if: ${{ !cancelled() && !failure() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ vars.DOSSIER_AUTOMATIC_IMAGE_PUBLISH == 'true' && !cancelled() && !failure() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
