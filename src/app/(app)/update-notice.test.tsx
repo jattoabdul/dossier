@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -42,7 +42,22 @@ describe("UpdateNotice", () => {
     expect(screen.getByRole("button", { name: "Sign out" })).toHaveFocus();
   });
 
-  it("comes back when that isn't saved", async () => {
+  it("keeps the notice visible until its dismissal has been saved", async () => {
+    const user = userEvent.setup();
+    const saved = Promise.withResolvers<Awaited<ReturnType<typeof dismissUpdate>>>();
+    vi.mocked(dismissUpdate).mockReturnValueOnce(saved.promise);
+    renderNotice();
+
+    await user.click(screen.getByRole("button", { name: "Not now" }));
+    expect(dismissUpdate).toHaveBeenCalledWith({ version: "1.6.0" });
+    expect(screen.getByRole("region", { name: "Dossier 1.6.0 is out" })).toBeVisible();
+
+    await act(async () => saved.resolve({ ok: true, data: null }));
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toHaveFocus();
+  });
+
+  it("stays visible when that isn't saved", async () => {
     const user = userEvent.setup();
     vi.mocked(dismissUpdate).mockResolvedValueOnce({ ok: false, error: "You seem to be offline." });
     renderNotice();
