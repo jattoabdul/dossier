@@ -84,3 +84,15 @@ Settings → Your data exports schema 6, including source references, review rec
 `personal backup` creates a PostgreSQL custom-format dump with 0600 permissions in `.local-personal/backups/`. JSON and database backups retain the index, not the original files or remote Google Docs. Back up those originals and `.local-personal/` separately to a private destination. Never commit this directory or upload it to the public fork.
 
 The personal service and database bind to loopback. Review current dependency advisories and email send reliability before expanding access or enabling sending. Local verification does not establish readiness for public-network exposure.
+
+### Email send review and recovery
+
+Sending remains disabled until the owner separately approves enabling it. Google consent alone does not enable sending.
+
+The hardened send flow first saves an immutable review containing the sender, recipients, subject, full message and exact PDF attachments. Opening the review waits for pending autosaves. The final confirmation accepts that review's ID; it does not reconstruct an email from documents that may have changed. Each attempt has a stable Message-ID and a durable database claim. Repeated or concurrent confirmations cannot initiate another POST for the same attempt. Intentional repeat sends require a new review.
+
+If Gmail's response is lost, malformed, or cannot be recorded locally, the attempt stays blocked from resending. **Review send status → Check send status** only reads Gmail or repairs the local record from an already saved provider receipt. An empty, unavailable or mismatching search never proves that an email was not sent. Such attempts remain blocked for manual review; there is no automatic retry or “assume not sent” shortcut. Acceptance by Gmail is not proof of inbox delivery to the recipient.
+
+Unresolved attempts survive application deletion. Bulk import and deletion refuse to erase pending send history, and a refused deletion preserves the Google connection. Frozen email/PDF snapshots are private database data; they are excluded from portable JSON exports along with other Gmail data. A full PostgreSQL backup retains this send history. Importing JSON requires fresh review before any send and must not be treated as restoration of an in-flight sending queue.
+
+Tests use disposable synthetic databases and a fake Gmail endpoint. Passing them does not constitute approval to enable real sending.

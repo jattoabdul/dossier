@@ -742,7 +742,7 @@ export function ApplicationView({
         </TabsContent>
 
         <TabsContent value="conversation" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
-          <ConversationTab emails={gmail?.emails ?? []} aiReady={aiReady} timeZone={timeZone} reading={gmail?.reading ?? false} />
+          <ConversationTab sendDisabled={gmail?.sender.from === null && gmail.sender.reason === "disabled"} emails={gmail?.emails ?? []} aiReady={aiReady} timeZone={timeZone} reading={gmail?.reading ?? false} />
         </TabsContent>
 
         <TabsContent value="posting" className="flex min-h-0 min-w-0 flex-[999_1_480px]">

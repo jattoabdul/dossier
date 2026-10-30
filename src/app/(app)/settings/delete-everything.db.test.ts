@@ -112,3 +112,21 @@ describe("deleteEverything (E10-8)", () => {
     expect(await snapshot()).toBe(before);
   });
 });
+
+
+it("keeps credentials, jobs and backups intact when an email send is unresolved", async () => {
+  const app = await prisma().application.findFirstOrThrow();
+  await prisma().googleAccount.create({ data: { email: "synthetic@example.com", refreshTokenEnc: "synthetic-opaque-token", scopes: "send" } });
+  await prisma().job.create({ data: { id: "pending-job", type: "refine", key: "pending:test", status: "QUEUED", input: {} } });
+  await prisma().emailSendIntent.create({ data: { kind: "APPLICATION", targetId: app.id, applicationId: app.id, accountEmail: "synthetic@example.com", scope: `APPLICATION:${app.id}`, messageId: "<pending@dossier.invalid>", fingerprint: "synthetic", payload: {}, state: "UNKNOWN" } });
+  const before = await snapshot();
+  expect(await deleteEverything({ confirm: "DELETE" })).toMatchObject({ ok: false, error: expect.stringContaining("pending email sends") });
+  expect(await prisma().googleAccount.count()).toBe(1);
+  expect((await prisma().job.findUniqueOrThrow({ where: { id: "pending-job" } })).status).toBe("QUEUED");
+  expect(await snapshot()).toBe(before);
+  expect(await readdir(path.join(dataDir.path, "backups"))).toHaveLength(1);
+  const file = parseExport(JSON.stringify(await buildExport(prisma(), { now })));
+  if (!file.ok) throw new Error(file.error);
+  await expect(importExport(prisma(), file.data)).rejects.toThrow("pending email sends");
+  expect(await snapshot()).toBe(before);
+});

@@ -63,3 +63,10 @@ describe("reading mail", () => {
     expect(htmlToText("<p>Hi&nbsp;Jane,</p><p>Could we talk?<br>Anna</p><style>p{}</style>")).toBe("Hi Jane,\nCould we talk?\nAnna");
   });
 });
+
+
+it("keeps a stable Message-ID and prevents reply-reference header injection", () => {
+  const message = buildMessage({ from: "Jane <jane@example.com>", to: "Anna <anna@example.com\r\nBcc: injected@example.com>", subject: "Application", body: "Synthetic", messageId: "<stable@dossier.invalid>", inReplyTo: "<reply@example.com>\r\nBcc: injected@example.com", references: "<previous@example.com>\r\nCc: injected@example.com" });
+  expect(message).toContain("Message-ID: <stable@dossier.invalid>\r\n");
+  expect(message).not.toMatch(/^Bcc:|^Cc:/m);
+});

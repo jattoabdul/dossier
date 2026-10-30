@@ -7,6 +7,7 @@ import { randomBytes } from "node:crypto";
 export type Attachment = { fileName: string; contentType: string; data: Uint8Array };
 
 export type OutgoingMail = {
+  messageId?: string;
   from: string;
   to: string;
   subject: string;
@@ -27,6 +28,7 @@ export function encodeHeader(value: string): string {
 
 /** "Name <a@b>" with the name encoded, or the address alone. */
 export function encodeAddress(value: string): string {
+  value = value.replace(/[\r\n]+/g, " ");
   const match = /^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/.exec(value);
   if (!match) return value.replace(/[\r\n]+/g, " ").trim();
   const [, name, address] = match;
@@ -54,7 +56,8 @@ export function buildMessage(mail: OutgoingMail, { boundary = `dossier-${randomB
     `Subject: ${encodeHeader(mail.subject)}`,
     `Date: ${date.toUTCString().replace("GMT", "+0000")}`,
     "MIME-Version: 1.0",
-    ...(mail.inReplyTo ? [`In-Reply-To: ${mail.inReplyTo}`, `References: ${[mail.references, mail.inReplyTo].filter(Boolean).join(" ")}`] : []),
+    ...(mail.messageId ? [`Message-ID: ${mail.messageId.replace(/[\r\n]/g, "")}`] : []),
+    ...(mail.inReplyTo ? [`In-Reply-To: ${mail.inReplyTo.replace(/[\r\n]/g, "")}`, `References: ${[mail.references, mail.inReplyTo].filter(Boolean).join(" ").replace(/[\r\n]/g, "")}`] : []),
   ];
   const text = ["Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64", "", wrapped(mail.body.replace(/\r?\n/g, "\r\n"))].join("\r\n");
   const attachments = mail.attachments ?? [];
