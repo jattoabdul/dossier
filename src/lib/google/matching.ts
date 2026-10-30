@@ -27,7 +27,7 @@ export type MatchableMail = {
   subject: string;
 };
 
-export type MailMatch = { applicationId: string; by: "thread" | "domain" | "company" } | null;
+export type MailMatch = { applicationId: string; by: "thread" | "domain" | "company" } | { applicationId: null; by: "ambiguous" } | null;
 
 /** "jobs.northwind.example" → "northwind.example": the part a company owns. */
 export function baseDomain(domain: string): string {
@@ -54,12 +54,15 @@ export function companyKey(company: string): string {
     .trim();
 }
 
-/** The most likely of several candidates: one still in progress, most recently changed. */
-function best(candidates: MatchableApplication[]): MatchableApplication | null {
-  if (candidates.length === 0) return null;
-  const open = candidates.filter((application) => isInProgress(application.status) && application.status !== ApplicationStatus.DRAFT);
-  const pool = open.length > 0 ? open : candidates;
-  return [...pool].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
+/** Automated account notices and vacancy digests are not application replies. */
+export function isApplicationNoise(mail: Pick<MatchableMail, "fromAddress" | "subject">): boolean {
+  return /^(jobalerts-noreply|jobs-noreply)@linkedin\.com$/i.test(mail.fromAddress)
+    || /personal access tokens|sign-in from (?:a )?new location|candidate portal access code|verification code|one-time (?:code|password)/i.test(mail.subject);
+}
+
+function containsCompany(value: string, key: string): boolean {
+  const words = value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return words.some((_, start) => words.slice(start, start + 6).some((_, end) => words.slice(start, start + end + 1).join("") === key));
 }
 
 export function matchMail(
@@ -68,29 +71,53 @@ export function matchMail(
   /** Gmail thread → application, from mail already linked. */
   threads: ReadonlyMap<string, string>,
 ): MailMatch {
+  if (isApplicationNoise(mail)) return null;
   const byThread = threads.get(mail.threadId);
   if (byThread && applications.some((application) => application.id === byThread)) return { applicationId: byThread, by: "thread" };
 
   const domain = baseDomain(domainOf(mail.fromAddress));
   if (domain && !FREEMAIL.has(domain)) {
-    const byDomain = best(applications.filter((application) => companyDomains(application).has(domain)));
-    if (byDomain) return { applicationId: byDomain.id, by: "domain" };
+    const byDomain = applications.filter((application) => companyDomains(application).has(domain));
+    // Recency and stage cannot identify the role, including at a shared agency.
+    if (byDomain.length > 1) return { applicationId: null, by: "ambiguous" };
+    if (byDomain.length === 1) {
+      const candidate = byDomain[0];
+      const key = companyKey(candidate.company);
+      if (key && applications.some((application) => application.id !== candidate.id && companyKey(application.company) === key)) return { applicationId: null, by: "ambiguous" };
+      return { applicationId: candidate.id, by: "domain" };
+    }
   }
 
-  // Only applications that were sent: a draft can't have had a reply.
-  const sent = applications.filter((application) => application.status !== ApplicationStatus.DRAFT);
-  const haystack = companyKey(`${mail.fromName} ${domain} ${mail.subject}`);
-  const byCompany = sent.filter((application) => {
+  // Include drafts when detecting ambiguity: an unreconciled draft may have
+  // been submitted outside Dossier. A sole draft still cannot claim a reply.
+  const recruitingSubject = /thank you for your interest|\b(apply|applying|application|interview|opportunity|candidate|candidacy|recruit\w*|engineer\w*|role|position|hiring|offer)\b/i.test(mail.subject);
+  const byCompany = applications.filter((application) => {
     const key = companyKey(application.company);
-    return key.length >= 4 && haystack.includes(key);
+    return key.length >= 4 && (containsCompany(mail.fromName, key) || containsCompany(domain, key) || (recruitingSubject && containsCompany(mail.subject, key)));
   });
-  // A name that fits several companies proves nothing.
-  const companies = new Set(byCompany.map((application) => companyKey(application.company)));
-  if (companies.size === 1) {
-    const match = best(byCompany);
-    if (match) return { applicationId: match.id, by: "company" };
+  if (byCompany.length === 1 && byCompany[0].status !== ApplicationStatus.DRAFT) {
+    return { applicationId: byCompany[0].id, by: "company" };
   }
+  if (byCompany.length > 1) return { applicationId: null, by: "ambiguous" };
   return null;
+}
+
+/** Narrow a first lookup to company names and recorded recruiting domains.
+ * Values are quoted data, never Gmail operators. Matching still runs locally.
+ * Existing threads use the broader lookup so renamed senders remain visible.
+ */
+export function initialInboxQuery(applications: readonly MatchableApplication[], days = 21): string | null {
+  const terms = new Set<string>();
+  const quote = (value: string) => `"${value.replace(/["\\\r\n{}]/g, " ").trim()}"`;
+  for (const application of applications) {
+    if (application.status !== ApplicationStatus.DRAFT && companyKey(application.company).length >= 4) {
+      terms.add(`from:${quote(application.company)}`);
+      terms.add(`subject:${quote(application.company)}`);
+    }
+    for (const domain of companyDomains(application)) terms.add(`from:${quote(domain)}`);
+  }
+  if (!terms.size) return null;
+  return `newer_than:${days}d -in:chats -category:promotions -category:social {${[...terms].join(" ")}}`;
 }
 
 const RANK: Record<ApplicationStatus, number> = {

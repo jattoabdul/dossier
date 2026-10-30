@@ -98,7 +98,7 @@ export function letterUnits(letter: z.output<typeof writtenLetterSchema>, signOf
 }
 
 /** Saves an application Claude wrote; returns its id and the parts marked "check this". */
-export async function saveWrittenApplication(input: WrittenApplication): Promise<{ applicationId: string; unverified: { part: string; items: string[] }[] }> {
+export async function saveWrittenApplication(input: WrittenApplication, writer = WRITTEN_IN_CLAUDE): Promise<{ applicationId: string; unverified: { part: string; items: string[] }[] }> {
   const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
   const { details } = input;
   const extracted: Extracted = {
@@ -129,8 +129,8 @@ export async function saveWrittenApplication(input: WrittenApplication): Promise
   }
 
   const applicationId = await createApplicationFromDocuments({
-    reading: { posting: input.posting, extracted, extractedWith: WRITTEN_IN_CLAUDE, matchedWith: WRITTEN_IN_CLAUDE },
-    documents: { resume, resumeWith: WRITTEN_IN_CLAUDE, letter, letterWith: WRITTEN_IN_CLAUDE },
+    reading: { posting: input.posting, extracted, extractedWith: writer, matchedWith: writer },
+    documents: { resume, resumeWith: writer, letter, letterWith: writer },
     match,
     details: {
       title: details.title?.trim() || [details.role, details.company].filter((part) => part.trim()).join(" · "),

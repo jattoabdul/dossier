@@ -33,6 +33,17 @@ describe("the fact guard (E6-6)", () => {
     expect(check("Mentored three junior designers at Northwind Logistics since Mar 2021.")).toEqual([]);
   });
 
+  it("does not treat a job requirement as evidence of candidate experience", () => {
+    const candidate = sourcesFor(profile, { ...extracted, salary: "95000" }, "Required: Kubernetes, managing 50 engineers.");
+    expect(unverifiedFacts("I led Kubernetes teams of 50 engineers.", candidate)).toEqual(["Kubernetes", "50"]);
+    expect(unverifiedFacts("I earned 95000.", candidate)).toEqual(["95000"]);
+  });
+
+  it("keeps employer context separate from the candidate's achievements", () => {
+    const contextual = { ...profile, experience: profile.experience.map(entry => ({ ...entry, descriptor: "Employer has 650 engineers and uses XenonDB." })) };
+    expect(unverifiedFacts("I led 650 engineers using XenonDB.", sourcesFor(contextual, extracted, ""))).toEqual(["XenonDB", "650"]);
+  });
+
   it("flags numbers the profile doesn't back", () => {
     expect(check("Led a team of 12 designers")).toEqual(["12"]);
     expect(check("Cut support tickets by 30%")).toEqual(["30%"]);
@@ -48,8 +59,8 @@ describe("the fact guard (E6-6)", () => {
     expect(check("Excited to apply. Happily, I'm based in Rotterdam.\n- Shipped the carrier portal in March")).toEqual([]);
   });
 
-  it("knows the posting's own names and the years of experience the profile adds up to", () => {
-    expect(check("I'd love to help Ledgerly's payments team in Amsterdam.")).toEqual([]);
+  it("asks for review of posting-only names and knows the profile's years of experience", () => {
+    expect(check("I'd love to help Ledgerly's payments team in Amsterdam.")).toEqual(["Ledgerly"]);
     expect(check("Eleven years of design, 11 in total.")).toEqual([]);
     expect(check("Twenty years of design")).toEqual(["Twenty"]);
   });
@@ -57,7 +68,7 @@ describe("the fact guard (E6-6)", () => {
   it("flags acronyms and credentials the profile doesn't have", () => {
     expect(check("An MBA and a certified scrum master")).toEqual(["MBA", "certified"]);
     expect(check("An MSc in Design for Interaction from TU Delft")).toEqual([]);
-    expect(check("Knows WCAG 2.2 well")).toEqual([]);
+    expect(check("Knows WCAG 2.2 well")).toEqual(["WCAG", "2.2"]);
   });
 
   it("flags years the profile doesn't have", () => {

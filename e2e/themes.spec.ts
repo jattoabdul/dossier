@@ -34,6 +34,9 @@ test("duplicates, exports, deletes and imports a theme", async ({ page }) => {
   await page.getByRole("button", { name: `Delete ${original} copy…` }).click();
   const dialog = page.getByRole("alertdialog", { name: `Delete “${original} copy”?` });
   await expect(dialog).toContainText("No application uses it.");
+  // Server-action revalidation can stream the title after the dialog content.
+  // Audit the settled document; a missing title must still fail this assertion.
+  await expect(page).toHaveTitle("Base resume · Dossier");
   const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
   expect(violations.filter((violation) => violation.impact === "serious" || violation.impact === "critical")).toEqual([]);
   await dialog.getByRole("button", { name: "Delete theme" }).click();
@@ -59,15 +62,15 @@ test("changes an application's theme from its Resume tab", async ({ page }) => {
   expect(await pdf()).not.toContain("Garamond");
 
   await page.goto(`/applications/${ledgerly.id}`);
-  await page.getByRole("button", { name: "Theme: Editorial" }).click();
+  await page.getByRole("button", { name: "Editorial theme" }).click();
   await page.getByRole("menuitemradio", { name: "Classic" }).click();
-  await expect(page.getByRole("button", { name: "Theme: Classic" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Classic theme" })).toBeVisible();
   const name = page.getByRole("article", { name: "Resume" }).getByRole("heading", { level: 1 });
   await expect(name).toHaveCSS("font-family", /Garamond/);
 
   await page.reload();
   await page.getByRole("tab", { name: "Cover letter" }).click();
-  await expect(page.getByRole("button", { name: "Theme: Classic" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Classic theme" })).toBeVisible();
   const documents = await sql(`SELECT kind, "themeId" FROM "Document" WHERE "applicationId" = $1 AND kind <> 'EMAIL' ORDER BY kind`, [ledgerly.id]);
   expect(documents).toEqual([
     { kind: "RESUME", themeId: "classic" },

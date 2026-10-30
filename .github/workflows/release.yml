@@ -2,7 +2,8 @@ name: Release
 
 # A version tag (v1.0.0) releases the image CI built for that commit: it's
 # tagged with the version and "latest" on GHCR, and a GitHub release is made
-# with the tag's message as its notes.
+# with the tag's message as its notes. This is disabled unless the repository
+# owner explicitly opts in through DOSSIER_AUTOMATIC_IMAGE_PUBLISH.
 
 on:
   push:
@@ -19,6 +20,7 @@ concurrency:
 jobs:
   release:
     name: Release
+    if: ${{ vars.DOSSIER_AUTOMATIC_IMAGE_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

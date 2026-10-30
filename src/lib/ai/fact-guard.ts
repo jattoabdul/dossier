@@ -2,9 +2,9 @@ import type { Extracted, Unit } from "@/lib/application-data";
 import { citationText } from "@/lib/citation";
 import { experienceMonths, formatDateRange, languageLevelLabel, type ProfileData } from "@/lib/profile";
 
-// The fact guard (E6-6, PRD §7, §12 "zero invented facts"): after each
+// The fact guard is a heuristic review aid, not proof of factual accuracy. After each
 // generation, the names, numbers, percentages, years and credentials in the
-// text are checked against the profile and the posting. What can't be found
+// text are checked against candidate evidence. What can't be found
 // is stored with the unit and shown as "check this" (E8-3). It's a safety
 // net for strict mode, tuned to stay quiet about what's legitimately there.
 
@@ -60,13 +60,15 @@ export function factSources(parts: string[]): FactSources {
   };
 }
 
-/** The profile and posting as fact sources, plus the years of experience the profile adds up to. */
-export function sourcesFor(profile: ProfileData, extracted: Extracted | null, posting: string, experienceYears?: number): FactSources {
+/** Candidate evidence only. A job requirement is not proof of candidate experience. */
+export function sourcesFor(profile: ProfileData, _extracted: Extracted | null, _posting: string, experienceYears?: number): FactSources {
   const { basics } = profile;
   const parts = [
     basics.name, basics.headline, basics.city, basics.country, basics.summary,
     ...profile.skills.map((skill) => skill.name),
     ...profile.languages.map((language) => `${language.name} ${languageLevelLabel(language.level)}`),
+    // Employer context is displayed verbatim, but is not evidence of the
+    // candidate's own skills, team size or achievements.
     ...profile.experience.flatMap((entry) => [entry.role, entry.company, entry.location, formatDateRange(entry), entry.bullets]),
     ...profile.projects.flatMap((entry) => [entry.name, entry.link, formatDateRange(entry), entry.bullets]),
     ...profile.education.flatMap((entry) => [entry.degree, entry.school, formatDateRange(entry), entry.notes]),
@@ -75,8 +77,6 @@ export function sourcesFor(profile: ProfileData, extracted: Extracted | null, po
     ...profile.references.flatMap((reference) => [reference.name, reference.relation, reference.company]),
     // What the candidate says about themselves backs claims like the rest (PRO-14).
     ...profile.facts.map((fact) => fact.text),
-    extracted ? [extracted.title, extracted.company, extracted.role, extracted.location, extracted.mode, extracted.salary].filter(Boolean).join(" ") : "",
-    posting,
     experienceYears === undefined ? "" : String(experienceYears),
   ];
   return factSources(parts);
@@ -149,5 +149,6 @@ export function guardSources(
   facts: string[] = [],
   today = new Date(),
 ): FactSources {
-  return sourcesFor(profile, extracted, [posting, ...facts].join("\n"), Math.floor(experienceMonths(profile, today) / 12));
+  const candidate = { ...profile, facts: [...profile.facts, ...facts.map((text, index) => ({ id: `application-fact-${index}`, text }))] };
+  return sourcesFor(candidate, extracted, posting, Math.floor(experienceMonths(profile, today) / 12));
 }

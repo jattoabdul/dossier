@@ -38,6 +38,18 @@ const FROM_ENV: Record<NonNullable<Env["DOSSIER_AI_PROVIDER"]>, AiProvider> = {
   lmstudio: AiProvider.LMSTUDIO,
 };
 
+/** Credentials belong to an HTTP origin. Invalid or credential-bearing URLs never match. */
+export function sameAiOrigin(a: string, b: string): boolean {
+  try {
+    const first = new URL(a);
+    const second = new URL(b);
+    return [first, second].every((url) => ["https:", "http:"].includes(url.protocol) && !url.username && !url.password)
+      && first.origin === second.origin;
+  } catch {
+    return false;
+  }
+}
+
 type SavedSettings = {
   provider: AiProvider | null;
   baseUrl: string | null;
@@ -53,13 +65,15 @@ type AiEnv = Pick<
 /**
  * Settings win once a provider is saved there; until then the environment
  * decides. The two are never mixed, except that an env key still serves a
- * saved provider of the same kind that has no key of its own.
+ * saved provider of the same kind and HTTP origin that has no key of its own.
  */
 export function resolveAiConfig(saved: SavedSettings | null, source: AiEnv, secret?: string): AiConfig {
   const envProvider = source.DOSSIER_AI_PROVIDER ? FROM_ENV[source.DOSSIER_AI_PROVIDER] : null;
   const useSaved = Boolean(saved?.provider);
   const provider = (useSaved ? saved!.provider : envProvider) ?? AiProvider.LOCAL;
   const defaults = PROVIDER_DEFAULTS[provider];
+  const baseUrl = (useSaved ? saved!.baseUrl : source.DOSSIER_AI_URL) || defaults.baseUrl;
+  const envBaseUrl = source.DOSSIER_AI_URL || defaults.baseUrl;
 
   let apiKey: string | null = null;
   let apiKeyProblem: string | null = null;
@@ -70,13 +84,13 @@ export function resolveAiConfig(saved: SavedSettings | null, source: AiEnv, secr
       if (!(error instanceof ApiKeyUnreadable)) throw error;
       apiKeyProblem = API_KEY_UNREADABLE;
     }
-  } else if (!useSaved || envProvider === provider) {
+  } else if (!useSaved || (envProvider === provider && sameAiOrigin(baseUrl, envBaseUrl))) {
     apiKey = source.DOSSIER_AI_KEY ?? null;
   }
 
   return {
     provider,
-    baseUrl: (useSaved ? saved!.baseUrl : source.DOSSIER_AI_URL) || defaults.baseUrl,
+    baseUrl,
     model: (useSaved ? saved!.model : source.DOSSIER_AI_MODEL) || defaults.model,
     apiKey,
     apiKeyProblem,

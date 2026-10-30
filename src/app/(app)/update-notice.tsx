@@ -65,10 +65,12 @@ export function UpdateNotice({ release, currentVersion }: { release: Release; cu
   const notNow = async () => {
     // Focus goes on to what follows the notice, rather than to the page.
     nextControl(notice.current)?.focus();
-    setHidden(true);
+    // Hiding the notice signals completion. A full-page navigation after an
+    // optimistic hide can cancel the action before the dismissal is saved.
     const result = await dismissUpdate({ version: release.version });
-    if (!result.ok) {
-      setHidden(false);
+    if (result.ok) {
+      setHidden(true);
+    } else {
       toast(result.error);
     }
   };

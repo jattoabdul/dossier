@@ -20,7 +20,7 @@ export async function proxy(request: NextRequest) {
   if (pathname === "/login") return pass(request);
   // The Claude connector (#221) brings its own credentials, an OAuth token,
   // which its routes check; they answer 404 while it's off.
-  if (CONNECTOR_PATHS.test(pathname)) return NextResponse.next();
+  if (pathname === "/api/codex/mcp" || CONNECTOR_PATHS.test(pathname)) return NextResponse.next();
 
   const session = await decodeSession(
     request.cookies.get(SESSION_COOKIE)?.value,

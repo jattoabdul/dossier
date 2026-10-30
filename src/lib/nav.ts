@@ -20,6 +20,7 @@ export const NAV: { label?: string; items: NavItem[] }[] = [
     label: "You",
     items: [
       { href: "/profile", label: "Profile", icon: UserRound },
+      { href: "/library", label: "Career library", icon: FileText },
       { href: "/resume", label: "Base resume", icon: FileText },
     ],
   },

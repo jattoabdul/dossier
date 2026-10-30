@@ -17,7 +17,7 @@ vi.mock("@/lib/env", () => ({
 }));
 const provider = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock("@/lib/ai", () => ({ getAiProvider: async () => provider.current }));
-vi.mock("@/lib/ai/config", () => ({ isAiConfigured: async () => true }));
+vi.mock("@/lib/ai/config", () => ({ isAiUsable: async () => provider.current !== null }));
 vi.mock("@/lib/ai/task-options", () => ({ loadTaskOptions: async () => ({ creativity: "BALANCED", strict: true, language: null }) }));
 vi.mock("@/lib/pdf/render", () => ({ renderPdf: async () => new Uint8Array([37, 80, 68, 70]) }));
 vi.mock("@/lib/time-zone", () => ({ userTimeZone: async () => "Europe/Berlin", lastKnownTimeZone: async () => "Europe/Berlin" }));
@@ -165,6 +165,57 @@ describe("the inbox check (E15-3)", () => {
     mailbox = [{ id: "m5", threadId: "t5", from: "Recruiter <talent@acme-hr.example>", subject: "Senior Designer role", text: "Interested?" }];
     await syncInbox();
     expect(await prisma().emailMessage.findFirst({ where: { gmailId: "m5" } })).toMatchObject({ applicationId: null });
+  });
+
+  it("keeps ambiguous employer mail unassigned in known-only scope without claiming its thread", async () => {
+    provider.current = null;
+    await prisma().application.update({ where: { id: "nw" }, data: { company: "Northwind", status: "SENT" } });
+    await prisma().application.create({ data: { id: "nw-other", company: "Northwind", status: "REJECTED", postingText: "jobs@northwind.example" } });
+    mailbox = [
+      { id: "ambiguous-first", threadId: "ambiguous", from: "HR <hr@northwind.example>", subject: "Application update", text: "A decision about a role." },
+      { id: "ambiguous-second", threadId: "ambiguous", from: "HR <hr@northwind.example>", subject: "Re: Application update", text: "More context." },
+    ];
+    expect(await syncInbox()).toEqual({ fetched: 2, kept: 2, read: 0 });
+    const kept = await prisma().emailMessage.findMany({ where: { threadId: "ambiguous" } });
+    expect(kept).toHaveLength(2);
+    expect(kept.every((email) => email.applicationId === null && email.suggestedStatus === null)).toBe(true);
+    expect(await syncInbox()).toEqual({ fetched: 0, kept: 0, read: 0 });
+    expect(await prisma().emailMessage.count({ where: { threadId: "ambiguous" } })).toBe(2);
+  });
+
+  it("narrows the first known-app lookup and skips classification without a usable model", async () => {
+    provider.current = null;
+    mailbox = [{ id: "domain", threadId: "domain-thread", from: "HR <hr@northwind.example>", subject: "Your application", text: "Thanks!" }];
+    expect(await syncInbox({ backfillDays: 60 })).toEqual({ fetched: 1, kept: 1, read: 0 });
+    const calls = vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url)));
+    expect(calls.find((url) => url.pathname.endsWith("/messages"))?.searchParams.get("q")).toBe('newer_than:60d -in:chats -category:promotions -category:social {from:"northwind.example"}');
+    expect(await prisma().emailMessage.findFirst({ where: { gmailId: "domain" } })).toMatchObject({ applicationId: "nw", classifiedWith: null });
+  });
+
+  it("does not persist account codes, job alerts, or unrelated company-word matches", async () => {
+    await prisma().application.update({ where: { id: "nw" }, data: { company: "Signal", status: "SCREENING", postingText: "Contact hr@signal.example" } });
+    mailbox = [
+      { id: "code", threadId: "code-thread", from: "Signal <hr@signal.example>", subject: "Candidate Portal Access Code", text: "A private code" },
+      { id: "alert", threadId: "alert-thread", from: "LinkedIn <jobalerts-noreply@linkedin.com>", subject: "Engineer at Signal", text: "Job digest" },
+      { id: "news", threadId: "news-thread", from: "News <newsletter@substack.com>", subject: "A weak signal", text: "Newsletter" },
+      { id: "recruiter", threadId: "recruiter-thread", from: "Talent <hr@signal.example>", subject: "Your application", text: "Thank you" },
+    ];
+    expect(await syncInbox()).toEqual({ fetched: 4, kept: 1, read: 1 });
+    expect((await prisma().emailMessage.findMany()).map((mail) => mail.gmailId)).toEqual(["recruiter"]);
+  });
+
+  it("keeps the old cursor on a failed backfill, then retries without duplicates", async () => {
+    await prisma().googleAccount.update({ where: { id: "google" }, data: { historyId: "100" } });
+    const original = fetch;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => String(url).includes("/messages?") ? new Response("failed", { status: 503 }) : original(url, init)));
+    await expect(syncInbox({ backfillDays: 60 })).rejects.toThrow();
+    expect(await prisma().googleAccount.findUnique({ where: { id: "google" } })).toMatchObject({ historyId: "100", lastSyncAt: null });
+    vi.stubGlobal("fetch", original);
+    mailbox = [{ id: "retry", threadId: "retry-thread", from: "HR <hr@northwind.example>", subject: "Your application", text: "Thanks!" }];
+    await syncInbox({ backfillDays: 60 });
+    await syncInbox({ backfillDays: 60 });
+    expect(await prisma().emailMessage.count()).toBe(1);
+    expect(await prisma().googleAccount.findUnique({ where: { id: "google" } })).toMatchObject({ historyId: "200", syncProblem: null });
   });
 
   it("answers in the thread and marks the reply as answered", async () => {

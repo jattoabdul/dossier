@@ -11,7 +11,7 @@ const GENERATE_SECRET = "for example the output of `openssl rand -base64 32`";
 const HASH_PASSWORD = "Make one with `docker run --rm -it ghcr.io/aientech/dossier hash-password`";
 
 export const AI_PROVIDERS = ["local", "openai", "anthropic", "mistral", "lmstudio"] as const;
-export const JOB_SOURCE_NAMES = ["jsearch", "adzuna", "arbeitsagentur", "off"] as const;
+export const JOB_SOURCE_NAMES = ["jsearch", "adzuna", "arbeitsagentur", "freehire", "off"] as const;
 
 // An empty value (`DOSSIER_AI_KEY=` in .env) counts as unset.
 const unsetIfEmpty = (value: unknown) =>
@@ -27,6 +27,13 @@ const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess(unsetIfEmpty, schema.optional());
 
 const schema = z.object({
+  // Synthetic evaluation: restrict server-side fetch to the local mock AI.
+  DOSSIER_DEMO_MODE: optional(z.enum(["on", "off"])),
+  DOSSIER_CAREER_ROOT: optional(z.string()),
+  DOSSIER_IMPORTS_ROOT: optional(z.string()),
+  DOSSIER_CODEX_BRIDGE_FILE: optional(z.string()),
+  DOSSIER_CODEX_SETUP_COMMAND: optional(z.string()),
+  DOSSIER_EMAIL_SEND: optional(z.enum(["on", "off"])),
   // Never echo the value: it may be the password itself, set by mistake.
   DOSSIER_PASSWORD: required(
     "DOSSIER_PASSWORD",
@@ -122,6 +129,11 @@ const schema = z.object({
   ),
   DOSSIER_ADZUNA_APP_ID: optional(z.string()),
   DOSSIER_ADZUNA_KEY: optional(z.string()),
+  // FreeHire origin; unset uses https://freehire.me. Point at a self-hosted
+  // FreeHire, or leave unset for the public catalogue.
+  DOSSIER_FREEHIRE_URL: optional(
+    z.url({ protocol: /^https?$/, error: "DOSSIER_FREEHIRE_URL must be an http:// or https:// URL." }).transform((url) => url.replace(/\/+$/, "")),
+  ),
   // Off takes the Bundesagentur für Arbeit out everywhere (#223): it isn't an
   // official API, so a server can choose not to offer it. Unset means on.
   DOSSIER_JOBS_ARBEITSAGENTUR: optional(

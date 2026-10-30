@@ -189,7 +189,7 @@ export function Gallery({ application }: { application: DemoApplication | null }
         <Card className="flex flex-col divide-y divide-line py-2">
           <Toggle
             className="py-4"
-            label="Never invent experience"
+            label="Ground drafts in your profile"
             description="Drafts may only use facts from your profile."
             checked={strict}
             onCheckedChange={setStrict}

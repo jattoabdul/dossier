@@ -1,6 +1,7 @@
 import "server-only";
 
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, open, readdir, rm, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { buildExport } from "@/lib/data-export";
@@ -26,10 +27,29 @@ export function backupFileName(reason: BackupReason, now: Date): string {
 /** Writes an export of everything to the backups folder; returns the file's name. */
 export async function writeBackup(reason: BackupReason, now = new Date()): Promise<string> {
   const data = await buildExport(prisma, { now });
-  await mkdir(backupsDir(), { recursive: true });
-  const name = backupFileName(reason, now);
-  await writeFile(path.join(backupsDir(), name), JSON.stringify(data, null, 2));
-  return name;
+  const dir = backupsDir();
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await chmod(dir, 0o700);
+  const temp = path.join(dir, `.writing-${randomUUID()}`);
+  const file = await open(temp, "wx", 0o600);
+  try {
+    await file.writeFile(JSON.stringify(data, null, 2));
+    await file.sync();
+    await file.close();
+    let name = backupFileName(reason, now);
+    try {
+      // An atomic, no-overwrite publication. Readers never see partial JSON.
+      await link(temp, path.join(dir, name));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      name = name.replace(/\.json$/, `-${randomUUID()}.json`);
+      await link(temp, path.join(dir, name));
+    }
+    return name;
+  } finally {
+    await file.close();
+    await rm(temp, { force: true });
+  }
 }
 
 /** The backup files, newest first. */

@@ -5,14 +5,17 @@ import { createHash, randomUUID } from "node:crypto";
 import { jwtVerify, SignJWT } from "jose";
 
 import { passwordFingerprint } from "@/lib/auth/session";
+import { env } from "@/lib/env";
 import { deriveKey } from "@/lib/keys";
 import { loadSettings } from "@/lib/settings-data";
+import { consumeCode, rotateRefresh, sessionActive } from "./token-store";
 
 // Sign-in for the Claude connector (#221, src/app/api/mcp): a small OAuth 2.1
 // authorization server, as Claude's custom connectors expect it, with
 // Dynamic Client Registration and PKCE (S256 only). Adapted from Anirudh
-// Sharma's fork of Dossier. It keeps nothing in the database: clients, codes
-// and tokens are signed with keys derived from DOSSIER_SECRET, and every one
+// Sharma's fork of Dossier. Clients, codes and tokens are signed with keys
+// derived from DOSSIER_SECRET. Grant consumption and refresh rotation are
+// recorded in ConnectorSession to prevent replay across server restarts. Every token
 // carries a fingerprint of DOSSIER_PASSWORD and the time the connector was
 // turned on (connectorEnabledAt). So a new password, a new secret, Disconnect
 // Claude or turning the connector off and on signs Claude out.
@@ -33,6 +36,7 @@ const key = (kind: TokenKind) => deriveKey(`connector-${kind}`);
 
 /** When the connector was turned on, or Claude last disconnected; null while it's off. */
 export async function connectorSince(): Promise<string | null> {
+  if (env.DOSSIER_DEMO_MODE === "on") return null;
   return (await loadSettings()).connectorEnabledAt;
 }
 
@@ -133,10 +137,10 @@ export function challengeOf(verifier: string): string {
 
 export type TokenPair = { access_token: string; refresh_token: string; token_type: "Bearer"; expires_in: number; scope: string };
 
-async function tokens(clientId: string, resource: string, current: { pwd: string; gen: string }): Promise<TokenPair> {
+async function tokens(clientId: string, resource: string, current: { pwd: string; gen: string }, sid: string, rid: string): Promise<TokenPair> {
   return {
-    access_token: await sign("access", { cid: clientId, res: resource, scope: SCOPE, ...current }, ACCESS_TOKEN_SECONDS),
-    refresh_token: await sign("refresh", { cid: clientId, res: resource, ...current }, REFRESH_TOKEN_SECONDS),
+    access_token: await sign("access", { cid: clientId, res: resource, scope: SCOPE, sid, ...current }, ACCESS_TOKEN_SECONDS),
+    refresh_token: await sign("refresh", { cid: clientId, res: resource, sid, rid, ...current }, REFRESH_TOKEN_SECONDS),
     token_type: "Bearer",
     expires_in: ACCESS_TOKEN_SECONDS,
     scope: SCOPE,
@@ -148,9 +152,14 @@ export async function exchangeCode({ code, clientId, redirectUri, verifier }: { 
   const [claims, current] = await Promise.all([verify("code", code), stamp()]);
   if (!claims || !stillValid(claims, current)) throw new OAuthError("invalid_grant", "The code is invalid or has expired.");
   if (claims.cid !== clientId) throw new OAuthError("invalid_grant", "The code was issued to another client.");
-  if (typeof claims.uri !== "string" || !sameRedirect(claims.uri, redirectUri)) throw new OAuthError("invalid_grant", "The redirect URI doesn't match.");
+  if (claims.uri !== redirectUri) throw new OAuthError("invalid_grant", "The redirect URI doesn't match.");
   if (!verifier || challengeOf(verifier) !== claims.chl) throw new OAuthError("invalid_grant", "The code verifier doesn't match.");
-  return tokens(clientId, String(claims.res ?? ""), current!);
+  const sid = claims.jti;
+  const rid = randomUUID();
+  if (typeof sid !== "string" || !(await consumeCode(sid, rid, new Date(Date.now() + REFRESH_TOKEN_SECONDS * 1000)))) {
+    throw new OAuthError("invalid_grant", "The code has already been used.");
+  }
+  return tokens(clientId, String(claims.res ?? ""), current!, sid, rid);
 }
 
 /** New tokens for a refresh token, with a new refresh token too. */
@@ -159,13 +168,19 @@ export async function refresh({ refreshToken, clientId }: { refreshToken: string
   if (!claims || !stillValid(claims, current) || claims.cid !== clientId) {
     throw new OAuthError("invalid_grant", "The refresh token is invalid or has expired.");
   }
-  return tokens(clientId, String(claims.res ?? ""), current!);
+  const { sid, rid } = claims;
+  const next = randomUUID();
+  if (typeof sid !== "string" || typeof rid !== "string" || !(await rotateRefresh(sid, rid, next))) {
+    throw new OAuthError("invalid_grant", "The refresh token has already been used or its session has expired.");
+  }
+  return tokens(clientId, String(claims.res ?? ""), current!, sid, next);
 }
 
 /** Whether a bearer token lets Claude use Dossier now; the client it was issued to, if so. */
 export async function verifyAccessToken(token: string | null | undefined): Promise<{ clientId: string } | null> {
   const [claims, current] = await Promise.all([verify("access", token), stamp()]);
   if (!claims || claims.scope !== SCOPE || !stillValid(claims, current)) return null;
+  if (typeof claims.sid !== "string" || !(await sessionActive(claims.sid))) return null;
   return { clientId: String(claims.cid ?? "") };
 }
 

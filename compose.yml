@@ -4,10 +4,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique database password}
       POSTGRES_DB: ${POSTGRES_DB:-dossier}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       # Postgres 18+ keeps data in a versioned subdirectory, so mount the parent.
       - pgdata:/var/lib/postgresql
@@ -26,9 +26,9 @@ services:
         condition: service_healthy
     environment:
       # Overrides the localhost URL in .env, which is meant for tools run on the host.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-dossier}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set a unique database password}@db:5432/${POSTGRES_DB:-dossier}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - .:/app
       # Keep the container's own (Debian) node_modules and build cache
@@ -48,7 +48,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-dossier}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set a unique database password}@db:5432/${POSTGRES_DB:-dossier}
     # Studio has no login and can edit every row, so keep it off the network.
     ports:
       - "127.0.0.1:5555:5555"
@@ -64,7 +64,7 @@ services:
   # http://ollama:11434; models are kept in the ollama volume.
   ollama:
     profiles: [ai]
-    image: ollama/ollama:0.40.6
+    image: ollama/ollama:0.40.10
     volumes:
       - ollama:/root/.ollama
 

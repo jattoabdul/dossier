@@ -1,0 +1,24 @@
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import { afterAll, beforeEach, expect, it, vi } from "vitest";
+import { createTestClient, resetDatabase } from "@/test/db";
+import { configureCodex, verifyCodexToken } from "./codex";
+import { buildExport } from "@/lib/data-export";
+const config=vi.hoisted(()=>({DOSSIER_SECRET:"test-secret".repeat(4),DOSSIER_PASSWORD:"test-password",DOSSIER_CODEX_BRIDGE_FILE:"",DOSSIER_PUBLIC_URL:"http://127.0.0.1:3401",DOSSIER_DEMO_MODE:"off"}));
+vi.mock("@/lib/env",()=>({env:config}));
+const db=vi.hoisted(()=>({client:undefined as ReturnType<typeof createTestClient>|undefined}));
+vi.mock("@/lib/prisma",async()=>{const {createTestClient}=await import("@/test/db");db.client=createTestClient();return {prisma:db.client};});
+let dir="";
+beforeEach(async()=>{await resetDatabase(db.client!);if(dir)await rm(dir,{recursive:true,force:true});dir=await mkdtemp(path.join(os.tmpdir(),"dossier-codex-"));config.DOSSIER_CODEX_BRIDGE_FILE=path.join(dir,"bridge.json");config.DOSSIER_DEMO_MODE="off";});
+afterAll(async()=>{await db.client!.$disconnect();if(dir)await rm(dir,{recursive:true,force:true});});
+it("requires a private credential, rotates it, excludes it from backups, and revokes on disconnect",async()=>{
+ await configureCodex(true);const first=JSON.parse(await readFile(config.DOSSIER_CODEX_BRIDGE_FILE,"utf8"));
+ expect((await stat(config.DOSSIER_CODEX_BRIDGE_FILE)).mode & 0o777).toBe(0o600);
+ expect(await verifyCodexToken()).toBe(false);expect(await verifyCodexToken("wrong")).toBe(false);expect(await verifyCodexToken(first.token)).toBe(true);
+ expect(JSON.stringify(await buildExport(db.client!))).not.toContain("codexTokenHash");
+ await configureCodex(true);expect(await verifyCodexToken(first.token)).toBe(false);
+ const second=JSON.parse(await readFile(config.DOSSIER_CODEX_BRIDGE_FILE,"utf8"));expect(await verifyCodexToken(second.token)).toBe(true);
+ await configureCodex(false);expect(await verifyCodexToken(second.token)).toBe(false);await expect(stat(config.DOSSIER_CODEX_BRIDGE_FILE)).rejects.toThrow();
+});
+it("does not enable the synthetic instance",async()=>{config.DOSSIER_DEMO_MODE="on";await expect(configureCodex(true)).rejects.toThrow("personal instance");});

@@ -5,6 +5,7 @@ import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { handOffFoundPosting, handOffPastedPosting, handsOffToClaude, PASTE_DAYS, readPastedPosting } from "./handoff";
+vi.mock("@/lib/env", () => ({ env: { DOSSIER_DEMO_MODE: "off" } }));
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -69,4 +70,14 @@ describe("handing work to Claude chat (#221)", () => {
     await sweepFinishedJobs(later, 24);
     expect(await prisma().claudePaste.count()).toBe(0);
   });
+});
+
+it("hands a pasted job to Codex when its local connector is enabled", async () => {
+  await prisma().setting.create({ data: { key: "codexTokenHash", value: "a".repeat(64) } });
+  expect(await handsOffToClaude(false)).toBe(true);
+  const url = new URL(await handOffPastedPosting({ text: "Backend role", url: "" }), "http://127.0.0.1:3401");
+  expect(url.pathname).toBe("/settings");
+  expect(url.searchParams.get("section")).toBe("codex");
+  expect(url.searchParams.get("prompt")).toContain("paste_id");
+  expect(await prisma().claudePaste.count()).toBe(1);
 });

@@ -31,6 +31,8 @@ import { GoogleSection } from "./google-section";
 import { GoogleNotice } from "./google-notice";
 import { JobSearchSection } from "./job-search-section";
 import { AboutSection, type AboutFacts, type UsagePingView } from "./about-section";
+import { codexEnabled } from "@/lib/connector/codex";
+import { CodexSection } from "./codex-section";
 import { ConnectorSection } from "./connector-section";
 import { settingsSectionFromParam } from "./sections";
 import { SettingsScreen } from "./settings-screen";
@@ -93,6 +95,8 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             }}
           />
         </>
+      ) : section === "codex" ? (
+        <CodexSection enabled={await codexEnabled()} command={env.DOSSIER_CODEX_SETUP_COMMAND ?? ""} prompt={typeof params.prompt === "string" ? params.prompt.slice(0, 4000) : "Use my Dossier connector to read my profile and list my career sources. Help me review my job priorities and prepare the next application. Use only verified facts, save documents as drafts, and ask before changing application statuses."} />
       ) : section === "claude" ? (
         <ConnectorSection initial={{ on: settings.connectorEnabledAt !== null }} address={mcpUrl(env.DOSSIER_PUBLIC_URL ?? (await requestOrigin()))} />
       ) : section === "data" ? (
@@ -164,9 +168,9 @@ async function filePreview() {
     prisma.application.findFirst({ where: { awaitingReview: false }, orderBy: { createdAt: "desc" }, select: { company: true, role: true } }),
   ]);
   return {
-    name: name.trim() || "Jane Doe",
-    company: latest?.company.trim() || "Ledgerly",
-    role: latest?.role.trim() || "Senior Product Designer",
+    name: name.trim() || "Your name",
+    company: latest?.company.trim() || "Company",
+    role: latest?.role.trim() || "Role",
   };
 }
 

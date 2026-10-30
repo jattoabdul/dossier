@@ -30,6 +30,43 @@ model ProfileField {
   updatedAt DateTime @updatedAt
 }
 
+/// Read-only references to career files and authoritative external documents.
+model CareerArtifact {
+  id           String   @id
+  rootKey      String?
+  relativePath String?
+  url          String?
+  title        String
+  collection   String
+  kind         String
+  sha256       String?
+  bytes        Int?
+  modifiedAt   DateTime?
+  indexedAt    DateTime @default(now())
+  @@index([collection])
+}
+
+/// Imported preparation collections are reviewed before becoming tracked applications.
+model CareerIntake {
+  id            String   @id
+  collection    String
+  company       String
+  role          String   @default("")
+  sourceStatus  String   @default("")
+  nextAction    String   @default("")
+  applicationId String?  @unique
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  reviewedAt    DateTime?
+  createdAt     DateTime @default(now())
+  @@index([collection])
+}
+
+model CareerImport {
+  id        String   @id
+  report    Json
+  createdAt DateTime @default(now())
+}
+
 model Skill {
   id          String            @id @default(cuid())
   /// Unique ignoring case ("Figma" and "figma" are the same skill).
@@ -65,6 +102,8 @@ model Experience {
   role       String            @default("")
   company    String            @default("")
   location   String            @default("")
+  /// One line about the company or the role, under its title on resumes as written (#257).
+  descriptor String            @default("")
   startYear  Int?
   /// 1–12, or null when only the year is known.
   startMonth Int?
@@ -388,6 +427,7 @@ enum FunnelStage {
 }
 
 model Application {
+  careerIntake CareerIntake?
   id                  String            @id @default(cuid())
   /// Whether the user made it, or the job agent prepared it (E16).
   origin              ApplicationOrigin @default(MANUAL)
@@ -580,6 +620,7 @@ enum PostingSource {
   JSEARCH
   ADZUNA
   ARBEITSAGENTUR
+  FREEHIRE
 }
 
 /// A posting from Find jobs that the user kept (E14-5): saved, dismissed, or
@@ -880,6 +921,16 @@ model EmailMessage {
 
 /// Failed sign-in attempts, for rate limiting (AUTH-5): one row per client IP,
 /// plus the key "*" counting attempts from all IPs together.
+/// Durable, single-use OAuth grants. No bearer tokens are stored here.
+model ConnectorSession {
+  id        String   @id
+  refreshId String
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+
+  @@index([expiresAt])
+}
+
 model LoginThrottle {
   /// The client IP, or "*" for the global counter.
   key          String    @id

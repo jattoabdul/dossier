@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,6 +8,9 @@ import { loadSettings, saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { lastNightlyBackup, nextRun, pruneBackups, runNightlyBackup } from "./backup-schedule";
+
+import { writeBackup } from "./backups";
+import { importExport, parseExport } from "./data-import";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -48,10 +51,32 @@ describe("nightly backups (E10-7)", () => {
     expect(await lastNightlyBackup()).toBeInstanceOf(Date);
   });
 
+  it("publishes complete private files without overwriting simultaneous backups", async () => {
+    const now = new Date();
+    const names = await Promise.all([writeBackup("before-import", now), writeBackup("before-import", now)]);
+    expect(new Set(names).size).toBe(2);
+    const dir = path.join(dataDir.path, "backups");
+    expect((await stat(dir)).mode & 0o777).toBe(0o700);
+    for (const name of names) {
+      expect((await stat(path.join(dir, name))).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(await readFile(path.join(dir, name), "utf8")).applications).toHaveLength(1);
+    }
+    expect((await readdir(dir)).filter((name) => name.startsWith(".writing-"))).toEqual([]);
+  });
+
   it("write nothing while they're off", async () => {
     await saveSettings({ nightlyBackup: false });
     expect(await runNightlyBackup()).toBe("off");
     expect(await backups()).toEqual([]);
+  });
+
+  it("restores application data from the file written by the backup service", async () => {
+    const name = await writeBackup("before-import");
+    const parsed = parseExport(await readFile(path.join(dataDir.path, "backups", name), "utf8"));
+    if (!parsed.ok) throw new Error(parsed.error);
+    await prisma().application.updateMany({ data: { company: "Changed after backup" } });
+    await importExport(prisma(), parsed.data);
+    expect(await prisma().application.findMany({ select: { company: true } })).toEqual([{ company: "Ledgerly" }]);
   });
 
   it("remove backups past the retention", async () => {
