@@ -1,4 +1,5 @@
 import "server-only";
+import { guardEmailSendHistory } from "@/lib/google/send-guard";
 
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { encryptApiKey } from "@/lib/ai/api-key";
@@ -86,6 +87,7 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
   const keptKeys = [...SECRET_SETTINGS.filter((key) => !fromFile[key]), ...INSTALL_SETTINGS];
   await db.$transaction(
     async (tx) => {
+      await guardEmailSendHistory(tx);
       // Out with the old. Applications take their history, documents, chat,
       // notes and jobs along; the other jobs (a resume import, postings read
       // for applications never created) hold the old data too.
@@ -101,6 +103,7 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
       // Scores of postings (#208) belong to the profile being replaced; they're left out of exports, since they can be made again.
       await tx.postingScore.deleteMany();
       // Mail from Gmail belongs to the applications being replaced; the next check fetches what's still relevant.
+      await tx.emailSendIntent.deleteMany();
       await tx.emailMessage.deleteMany();
       await tx.application.deleteMany();
       await tx.experience.deleteMany();

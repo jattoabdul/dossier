@@ -488,6 +488,7 @@ model Application {
   documents           Document[]
   messages            ChatMessage[]
   notes               Note[]
+  sendIntents         EmailSendIntent[]
   /// What the user tells the AI for this application; "Anything I should know?" (NEW-6) becomes the first.
   facts               Fact[]
   /// Its background jobs, deleted with it (their inputs and results hold the posting and the documents).
@@ -980,4 +981,28 @@ model Job {
   @@index([key, createdAt])
   @@index([status])
   @@index([applicationId])
+}
+
+/// A reviewed, immutable Gmail payload. SENDING/UNKNOWN must never be resent automatically.
+model EmailSendIntent {
+  id            String   @id @default(uuid())
+  scope         String?  @unique
+  kind          String
+  targetId      String
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  accountEmail  String
+  fingerprint   String
+  messageId     String   @unique
+  payload       Json
+  state         String   @default("PREPARED")
+  gmailId       String?
+  threadId      String?
+  eventId       String?
+  attemptedAt   DateTime?
+  sentAt        DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([kind, targetId])
 }

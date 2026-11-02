@@ -19,7 +19,8 @@ import { disconnectGoogle, googleConnection } from "./account";
 import { proposeSlots, scheduleInterview } from "./availability";
 import { GoogleError } from "./errors";
 import { loadGoogleClientConfig } from "./oauth";
-import { sendApplicationEmail, sendReply } from "./send";
+import { prepareApplicationEmail, prepareReply } from "./send";
+import { activeSendReview, confirmIntent, reconcileIntent, sendReview } from "./send-intent";
 import { formatSlot } from "./slots";
 import { checkInboxNow, readReply } from "./sync";
 
@@ -128,12 +129,25 @@ export const checkInbox = action(z.object({}), async (_, { toast }) => {
   return result;
 });
 
-/** "Send with Gmail" on the Email tab, after the confirmation. */
-export const sendWithGmail = action(z.object({ id: z.string().min(1) }), async ({ id }, { toast }) => {
-  const sent = await google(() => sendApplicationEmail(id));
+export const inspectGmailSend = action(z.object({ kind: z.enum(["APPLICATION", "REPLY"]), targetId: z.string().min(1) }), async ({ kind, targetId }) => activeSendReview(kind, targetId));
+
+/** Freezes the message and attachments before the user reviews them. */
+export const prepareGmailSend = action(z.object({ id: z.string().min(1), resend: z.boolean().default(false) }), async ({ id, resend }) => google(() => prepareApplicationEmail(id, resend)));
+export const prepareGmailReply = action(z.object({ emailId: z.string().min(1), body: z.string().min(1).max(20_000), resend: z.boolean().default(false) }), async ({ emailId, body, resend }) => google(() => prepareReply(emailId, body, resend)));
+
+/** Confirmation accepts only the immutable review ID, never a mutable application ID. */
+export const confirmGmailSend = action(z.object({ intentId: z.string().uuid() }), async ({ intentId }, { toast }) => {
+  const sent = await google(() => confirmIntent(intentId));
   refreshEverything();
   toast(sent.eventId ? `Sent. ${statusInfo(ApplicationStatus.SENT).toast}` : "Sent. I'll watch for replies.");
-  return { eventId: sent.eventId };
+  return { review: sendReview(sent), eventId: sent.eventId };
+});
+
+export const checkGmailSend = action(z.object({ intentId: z.string().uuid() }), async ({ intentId }, { toast }) => {
+  const sent = await google(() => reconcileIntent(intentId));
+  refreshEverything();
+  if (sent.state === "SENT") toast("The message was sent. Dossier is up to date.");
+  return { review: sendReview(sent), eventId: sent.eventId };
 });
 
 /** Drafts (or redrafts) the answer to an email in the background. */
@@ -153,14 +167,6 @@ export const startDraftingReply = action(
 export const saveReplyDraft = action(z.object({ emailId: z.string().min(1), body: z.string().max(20_000) }), async ({ emailId, body }) => {
   const { count } = await prisma.emailMessage.updateMany({ where: { id: emailId }, data: { replyDraft: body } });
   if (count === 0) throw new ActionError("That email is no longer in Dossier.");
-  return null;
-});
-
-/** "Send" on a drafted answer, after the confirmation. */
-export const sendReplyEmail = action(z.object({ emailId: z.string().min(1), body: z.string().min(1).max(20_000) }), async ({ emailId, body }, { toast }) => {
-  await google(() => sendReply(emailId, body));
-  refreshEverything();
-  toast("Answer sent.");
   return null;
 });
 

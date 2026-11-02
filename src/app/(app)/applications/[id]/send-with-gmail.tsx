@@ -1,103 +1,61 @@
 "use client";
 
-import { AlertDialog } from "radix-ui";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-
+import { use, useEffect, useState, useTransition } from "react";
+import { PendingSavesContext } from "@/components/save-boundary";
 import { toastWithUndo } from "@/components/change-status";
+import { SendReviewDialog } from "@/components/email/send-review";
 import { toast } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
-import { emailAddresses } from "@/lib/application-email";
-import { sendWithGmail } from "@/lib/google/actions";
+import { checkGmailSend, confirmGmailSend, inspectGmailSend, prepareGmailSend } from "@/lib/google/actions";
+import type { SendReview } from "@/lib/google/send-intent";
 
-/** Whether Gmail can send, for the Email tab: the account it sends from, or why not. */
-export type GmailSender = { from: string } | { from: null; reason: "not-configured" | "not-connected" | "no-permission" };
+export type GmailSender = { from: string } | { from: null; reason: "not-configured" | "not-connected" | "no-permission" | "disabled" };
 
-/**
- * "Send with Gmail" (E15-2): sends the email from the connected account with
- * the PDFs attached, after a confirmation that says exactly what goes where.
- */
-export function SendWithGmail({
-  applicationId,
-  sender,
-  to,
-  subject,
-  attachments,
-  sentBefore,
-}: {
-  applicationId: string;
-  sender: GmailSender;
-  to: string;
-  subject: string;
-  attachments: string[];
-  /** It went out through Gmail already. */
-  sentBefore: boolean;
+export function SendWithGmail({ applicationId, sender, sentBefore }: {
+  applicationId: string; sender: GmailSender; sentBefore: boolean;
 }) {
   const router = useRouter();
+  const saves = use(PendingSavesContext);
   const [open, setOpen] = useState(false);
-  const [sending, startSending] = useTransition();
-
-  if (sender.from === null) {
+  const [review, setReview] = useState<SendReview | null>(null);
+  const [pending, startTransition] = useTransition();
+  useEffect(() => {
+    let active = true;
+    void inspectGmailSend({ kind: "APPLICATION", targetId: applicationId }).then(result => {
+      if (active && result.ok && result.data && ["SENDING", "UNKNOWN"].includes(result.data.state)) setReview(current => current ?? result.data);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [applicationId]);
+  const uncertain = review && ["SENDING", "UNKNOWN"].includes(review.state);
+  if (sender.from === null && !uncertain) {
     if (sender.reason === "not-configured") return null;
-    return (
-      <a href={sender.reason === "no-permission" ? "/api/google/connect?scopes=send" : "/settings?section=google"} className={buttonClassName("secondary", "md")}>
-        {sender.reason === "no-permission" ? "Allow sending with Gmail" : "Connect Gmail to send"}
-      </a>
-    );
+    if (sender.reason === "disabled") return <p className="text-meta text-muted">Email sending is disabled. You can keep preparing your drafts.</p>;
+    return <a href={sender.reason === "no-permission" ? "/api/google/connect?scopes=send" : "/settings?section=google"} className={buttonClassName("secondary", "md")}>
+      {sender.reason === "no-permission" ? "Allow sending with Gmail" : "Connect Gmail to send"}
+    </a>;
   }
-
-  const ready = emailAddresses(to).length > 0 && subject.trim().length > 0;
-  const send = () =>
-    startSending(async () => {
-      setOpen(false);
-      const result = await sendWithGmail({ id: applicationId });
-      if (!result.ok) return toast(result.error);
-      toastWithUndo(result.toast, result.data.eventId);
-      router.refresh();
-    });
-
-  return (
-    <AlertDialog.Root open={open} onOpenChange={setOpen}>
-      <Button
-        aria-disabled={sending || !ready || undefined}
-        onClick={() => {
-          if (sending) return;
-          if (!ready) return toast(emailAddresses(to).length === 0 ? "Add who it's to first: the posting doesn't give an address." : "Add a subject first.");
-          setOpen(true);
-        }}
-      >
-        {sending ? "Sending…" : sentBefore ? "Send again with Gmail" : "Send with Gmail"}
-      </Button>
-      <AlertDialog.Portal>
-        <AlertDialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
-        <AlertDialog.Content className="fixed top-1/2 left-1/2 z-50 flex w-[min(480px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-dialog border border-line-popover bg-card p-6 shadow-menu">
-          <AlertDialog.Title className="font-serif text-[22px] leading-tight">Send this application?</AlertDialog.Title>
-          <AlertDialog.Description asChild>
-            <div className="flex flex-col gap-3 text-sm text-muted">
-              <dl className="grid grid-cols-[64px_1fr] gap-x-3 gap-y-1.5">
-                <dt>From</dt>
-                <dd className="text-ink [overflow-wrap:anywhere]">{sender.from}</dd>
-                <dt>To</dt>
-                <dd className="text-ink [overflow-wrap:anywhere]">{to}</dd>
-                <dt>Subject</dt>
-                <dd className="text-ink [overflow-wrap:anywhere]">{subject}</dd>
-                <dt>Attached</dt>
-                <dd className="text-ink [overflow-wrap:anywhere]">{attachments.length > 0 ? attachments.join(", ") : "Nothing"}</dd>
-              </dl>
-              <p>
-                {sentBefore ? "It's already gone out once; this sends it again. " : "It moves to Sent, and "}
-                I&apos;ll watch the thread for replies. This can&apos;t be unsent.
-              </p>
-            </div>
-          </AlertDialog.Description>
-          <div className="mt-2 flex justify-end gap-2">
-            <AlertDialog.Cancel className={buttonClassName("secondary", "sm")}>Cancel</AlertDialog.Cancel>
-            <AlertDialog.Action className={buttonClassName("primary", "sm", "hover:text-on-primary")} onClick={send}>
-              Send now
-            </AlertDialog.Action>
-          </div>
-        </AlertDialog.Content>
-      </AlertDialog.Portal>
-    </AlertDialog.Root>
-  );
+  const prepare = () => startTransition(async () => {
+    if (saves && !await saves.flush()) return toast("Save your changes before reviewing the email.");
+    const result = await prepareGmailSend({ id: applicationId, resend: sentBefore }).catch(() => ({ ok: false as const, error: "Could not prepare the email. Try again." }));
+    if (!result.ok) return toast(result.error);
+    setReview(result.data);
+    setOpen(true);
+  });
+  const finish = (check: boolean) => startTransition(async () => {
+    if (!review) return;
+    const result = await (check ? checkGmailSend : confirmGmailSend)({ intentId: review.id }).catch(() => ({ ok: false as const, error: "The result could not be confirmed. Check send status before trying again." }));
+    if (!result.ok) {
+      setReview({ ...review, state: "UNKNOWN" });
+      return toast(result.error);
+    }
+    setReview(result.data.review);
+    toastWithUndo(result.toast, result.data.eventId);
+    if (result.data.review.state === "SENT") setOpen(false);
+    router.refresh();
+  });
+  return <>
+    <Button disabled={pending} onClick={() => uncertain ? setOpen(true) : prepare()}>{pending ? "Please wait…" : uncertain ? "Review send status" : sentBefore ? "Send again with Gmail" : "Send with Gmail"}</Button>
+    <SendReviewDialog review={review} title="Send this application?" open={open} busy={pending} onOpenChange={setOpen} onConfirm={() => finish(false)} onCheck={() => finish(true)} />
+  </>;
 }

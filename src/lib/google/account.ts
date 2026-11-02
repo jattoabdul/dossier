@@ -2,6 +2,7 @@ import "server-only";
 
 import { setTimeout as delay } from "node:timers/promises";
 
+import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret, encryptSecret, GOOGLE_TOKEN, SecretUnreadable } from "@/lib/secrets";
 
@@ -22,6 +23,7 @@ export type GoogleConnection =
       status: "connected";
       email: string;
       canSend: boolean;
+      sendDisabled?: boolean;
       canRead: boolean;
       canUseCalendar: boolean;
       lastSyncAt: Date | null;
@@ -40,6 +42,7 @@ export async function googleConnection(): Promise<GoogleConnection> {
     status: "connected",
     email: account.email,
     canSend: hasScopes(account.scopes, "send"),
+    sendDisabled: env.DOSSIER_EMAIL_SEND === "off" || env.DOSSIER_DEMO_MODE === "on",
     canRead: hasScopes(account.scopes, "read"),
     canUseCalendar: hasScopes(account.scopes, "calendar"),
     lastSyncAt: account.lastSyncAt,
@@ -63,7 +66,7 @@ export async function saveGoogleAccount({ email, refreshToken, scopes }: { email
     create: { id: ACCOUNT_ID, email, refreshTokenEnc, scopes },
     update: { email, refreshTokenEnc, scopes: merged, ...(sameAccount ? {} : { historyId: null, lastSyncAt: null, syncProblem: null }) },
   });
-  tokens.delete(ACCOUNT_ID);
+  tokens.clear();
 }
 
 /** Disconnects: revokes the grant at Google and forgets the account. Mail already fetched stays. */
@@ -76,7 +79,7 @@ export async function disconnectGoogle(): Promise<void> {
     if (!(error instanceof SecretUnreadable)) throw error;
   }
   await prisma.googleAccount.deleteMany({ where: { id: ACCOUNT_ID } });
-  tokens.delete(ACCOUNT_ID);
+  tokens.clear();
 }
 
 // On globalThis, so the dev server's hot reloads keep them.
@@ -84,13 +87,15 @@ const globalForTokens = globalThis as unknown as { googleTokens?: Map<string, { 
 const tokens = (globalForTokens.googleTokens ??= new Map());
 
 /** A valid access token for the connected account, refreshed when it's about to expire. */
-export async function accessToken(group: ScopeGroup, signal?: AbortSignal): Promise<string> {
+export async function accessToken(group: ScopeGroup, signal?: AbortSignal, expectedEmail?: string): Promise<string> {
   const account = await loadGoogleAccount();
   if (!account) throw new GoogleError("not-connected", "Connect your Google account in Settings → Google first.");
   if (!hasScopes(account.scopes, group)) {
     throw new GoogleError("scope", "Dossier doesn't have that permission yet. Allow it in Settings → Google.");
   }
-  const cached = tokens.get(ACCOUNT_ID);
+  if (expectedEmail && account.email.toLowerCase() !== expectedEmail.toLowerCase()) throw new GoogleError("not-connected", "The connected account changed. Review the message again.");
+  const tokenKey = `${account.email.toLowerCase()}:${account.refreshTokenEnc}`;
+  const cached = tokens.get(tokenKey);
   if (cached && cached.expires > Date.now() + 60_000) return cached.token;
   let refreshToken: string;
   try {
@@ -99,7 +104,7 @@ export async function accessToken(group: ScopeGroup, signal?: AbortSignal): Prom
     throw new GoogleError("revoked", "The saved Google access can't be read, probably since DOSSIER_SECRET changed. Connect your Google account again.");
   }
   const answer = await refreshAccessToken(refreshToken, signal);
-  tokens.set(ACCOUNT_ID, { token: answer.access_token, expires: Date.now() + answer.expires_in * 1000 });
+  tokens.set(tokenKey, { token: answer.access_token, expires: Date.now() + answer.expires_in * 1000 });
   return answer.access_token;
 }
 
@@ -112,9 +117,10 @@ const MAX_BYTES = 30 * 1024 * 1024;
 export async function googleFetch<T = unknown>(
   group: ScopeGroup,
   url: string | URL,
-  { method = "GET", body, signal }: { method?: string; body?: unknown; signal?: AbortSignal } = {},
+  { method = "GET", body, signal, expectedEmail }: { method?: string; body?: unknown; signal?: AbortSignal; expectedEmail?: string } = {},
 ): Promise<T> {
-  const token = await accessToken(group, signal);
+  const token = await accessToken(group, signal, expectedEmail);
+  if (expectedEmail && (await loadGoogleAccount())?.email.toLowerCase() !== expectedEmail.toLowerCase()) throw new GoogleError("not-connected", "The connected account changed. Review the message again.");
   const timeout = AbortSignal.timeout(30_000);
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const path = new URL(url).pathname;
@@ -132,7 +138,7 @@ export async function googleFetch<T = unknown>(
       throw new GoogleError("unavailable", "Couldn't reach Google. Try again in a moment.");
     }
     if (response.status === 401) {
-      tokens.delete(ACCOUNT_ID);
+      tokens.clear();
       throw new GoogleError("revoked", "Google no longer accepts Dossier's access. Connect your Google account again.", `${path}: 401`);
     }
     // Gmail uses 403 for quota exhaustion as well as missing permissions.

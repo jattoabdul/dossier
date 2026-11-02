@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-vi.mock("@/lib/prisma", () => ({prisma:{googleAccount:{findUnique:async()=>({scopes:"read",refreshTokenEnc:"encrypted"})}}}));
+vi.mock("@/lib/prisma", () => ({prisma:{googleAccount:{findUnique:async()=>({email:"jane@example.com",scopes:"read",refreshTokenEnc:"encrypted"})}}}));
 vi.mock("@/lib/secrets", () => ({decryptSecret:()=>"refresh",encryptSecret:()=>"encrypted",GOOGLE_TOKEN:{},SecretUnreadable:class extends Error{}}));
 vi.mock("./oauth", () => ({googleClient:async()=>({}),hasScopes:()=>true,refreshAccessToken:async()=>({access_token:"test-token",expires_in:3600}),revokeToken:async()=>{}}));
 import { googleFetch } from "./account";

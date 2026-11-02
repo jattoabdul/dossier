@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { fakeGoogle, resetData, sql } from "./support";
+import { FAKE_GOOGLE_PORT, fakeGoogle, resetData, sql } from "./support";
 
 // Gmail and Calendar (E15), against the fake Google (e2e/fake-google.mts):
 // entering the OAuth client in Settings, connecting, sending an application
@@ -17,6 +17,7 @@ test.beforeAll(async () => {
 });
 // Other specs and the README captures see Google not set up.
 test.afterAll(async () => {
+  await sql(`DELETE FROM "EmailSendIntent"`);
   await sql(`DELETE FROM "EmailMessage"`);
   await sql(`DELETE FROM "GoogleAccount"`);
   await sql(`DELETE FROM "Setting" WHERE key IN ('googleClientId', 'googleClientSecretEnc')`);
@@ -35,7 +36,7 @@ async function expectAccessible(page: Page) {
 
 const status = async () => (await sql<{ status: string }>(`SELECT status FROM "Application" WHERE id = $1`, [ledgerly]))[0].status;
 
-test("connects Google, sends an application through Gmail, and answers the reply", async ({ page }) => {
+test("connects Google, sends an application through Gmail, and answers the reply", async ({ page }, testInfo) => {
   // Colours change at once when the scheme does, for axe to see them settled.
   await page.emulateMedia({ reducedMotion: "reduce" });
   // Not set up yet: Settings → Google takes the OAuth client, then connects.
@@ -59,7 +60,7 @@ test("connects Google, sends an application through Gmail, and answers the reply
   await expect(page.getByRole("article", { name: "Email" }).getByRole("group", { name: "Recipient" })).toContainText("careers@example.com");
   await page.getByRole("button", { name: "Send with Gmail" }).click();
   const confirmSend = page.getByRole("alertdialog", { name: "Send this application?" });
-  await expect(confirmSend).toContainText("Fromjane.doe@gmail.example");
+  await expect(confirmSend).toContainText("FromJane Doe <jane.doe@gmail.example>");
   await expect(confirmSend).toContainText(/Attached.*Resume\.pdf, .*Cover letter\.pdf/);
   await expectAccessible(page);
   await confirmSend.getByRole("button", { name: "Send now" }).click();
@@ -101,6 +102,31 @@ test("connects Google, sends an application through Gmail, and answers the reply
   expect(reply.raw).toMatch(/^Subject: Re: Application: Senior Product Designer, Payments\r?$/m);
   expect(reply.text).toContain("My notice period is three months.");
   expect(reply.text).toMatch(/Best regards,\r?\nJane Doe$/);
+
+  // A fresh review is immutable and a lost send response stays safe across reload.
+  await page.goto(`/applications/${ledgerly}?tab=email`);
+  await page.getByRole("button", { name: "Send again with Gmail" }).click();
+  const review = page.getByRole("alertdialog", { name: "Send this application?" });
+  await expect(review).toContainText("Dear John,");
+  await page.screenshot({ path: testInfo.outputPath("synthetic-send-review.png") });
+  const beforeLost = (await fakeGoogle()).sent.length;
+  const pdfLink = review.getByRole("link").first();
+  const attachmentResponse = await page.request.get((await pdfLink.getAttribute("href"))!);
+  expect(attachmentResponse.ok()).toBe(true);
+  expect((await attachmentResponse.body()).subarray(0, 4).toString()).toBe("%PDF");
+  await fetch(`http://localhost:${FAKE_GOOGLE_PORT}/test/lose-next-send-response`, { method: "POST" });
+  await review.getByRole("button", { name: "Send now" }).click();
+  await expect(review.getByRole("button", { name: "Check send status" })).toBeVisible();
+  await expect(review.getByRole("button", { name: "Send now" })).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath("synthetic-send-uncertain.png") });
+  expect((await fakeGoogle()).sent).toHaveLength(beforeLost + 1);
+  await page.reload();
+  await page.getByRole("button", { name: "Review send status" }).click();
+  await expect(review.getByRole("button", { name: "Check send status" })).toBeVisible();
+  await review.getByRole("button", { name: "Check send status" }).click();
+  await expect(review).toBeHidden();
+  expect((await fakeGoogle()).sent).toHaveLength(beforeLost + 1);
+  expect((await sql<{ count: number }>(`SELECT count(*)::int AS count FROM "EmailSendIntent" WHERE state = 'UNKNOWN'`))[0].count).toBe(0);
 
   // Disconnecting revokes Dossier's access at Google.
   await page.goto("/settings?section=google");

@@ -118,7 +118,9 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
           : {
               sender:
                 google.status === "connected"
-                  ? google.canSend
+                  ? google.sendDisabled
+                    ? { from: null, reason: "disabled" }
+                    : google.canSend
                     ? { from: google.email }
                     : { from: null, reason: "no-permission" }
                   : { from: null, reason: google.status === "not-configured" ? "not-configured" : "not-connected" },

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { JobStatus } from "@/generated/prisma/enums";
 import { writeBackup } from "@/lib/backups";
+import { assertNoPendingEmailSends, PendingEmailSends } from "@/lib/google/send-guard";
 import { currentSummary, importExport, parseExport, summarizeExport } from "@/lib/data-import";
 import { IMPORT_MAX_BYTES, IMPORT_TOO_BIG } from "@/lib/import-limits";
 import { cancelJob } from "@/lib/jobs/runner";
@@ -29,12 +30,20 @@ export const POST = route(async (request) => {
     return NextResponse.json({ incoming, current: await currentSummary(prisma), exportedAt: parsed.data.exportedAt });
   }
 
+  try { await assertNoPendingEmailSends(prisma); } catch (error) {
+    if (error instanceof PendingEmailSends) return NextResponse.json({ error: error.message }, { status: 409 });
+    throw error;
+  }
+
   // Work in progress would write into data that's about to be replaced.
   const unfinished = await prisma.job.findMany({ where: { status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] } }, select: { id: true } });
   for (const job of unfinished) await cancelJob(job.id);
 
   const backup = await writeBackup("before-import");
-  await importExport(prisma, parsed.data);
+  try { await importExport(prisma, parsed.data); } catch (error) {
+    if (error instanceof PendingEmailSends) return NextResponse.json({ error: error.message }, { status: 409 });
+    throw error;
+  }
   revalidatePath("/", "layout");
   return NextResponse.json({ incoming, backup });
 });

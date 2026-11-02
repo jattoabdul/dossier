@@ -6,21 +6,34 @@ import { env } from "@/lib/env";
 import { googleFetch } from "./account";
 import { googleUrl } from "./endpoints";
 import { GoogleError, isGone } from "./errors";
-import { buildMessage, decodeHeader, htmlToText, toBase64Url, type OutgoingMail } from "./mime";
+import { decodeHeader, htmlToText } from "./mime";
 
 // The parts of the Gmail API Dossier uses (E15-2, E15-3).
 
 const api = (path: string) => googleUrl("gmail", `/gmail/v1/users/me${path}`);
 
-/** Sends a message; with `threadId` it joins that thread. */
-export async function sendMail(mail: OutgoingMail, { threadId }: { threadId?: string } = {}): Promise<{ id: string; threadId: string }> {
-  if (env.DOSSIER_DEMO_MODE === "on" || env.DOSSIER_EMAIL_SEND === "off") throw new Error("Email sending is disabled on this instance.");
-  const raw = toBase64Url(buildMessage(mail));
-  const sent = await googleFetch<{ id: string; threadId: string }>("send", api("/messages/send"), {
-    method: "POST",
-    body: threadId ? { raw, threadId } : { raw },
-  });
-  return { id: sent.id, threadId: sent.threadId };
+export function assertEmailSendingEnabled() {
+  if (env.DOSSIER_DEMO_MODE === "on" || env.DOSSIER_EMAIL_SEND === "off") throw new GoogleError("unavailable", "Email sending is disabled on this instance.");
+}
+
+/** One POST only. A missing or malformed response is an uncertain outcome. */
+export async function sendRawMail(raw: string, { threadId, expectedEmail }: { threadId?: string; expectedEmail?: string } = {}) {
+  assertEmailSendingEnabled();
+  return z.object({ id: z.string().min(1), threadId: z.string().min(1) }).parse(await googleFetch("send", api("/messages/send"), {
+    method: "POST", body: threadId ? { raw, threadId } : { raw }, expectedEmail,
+  }));
+}
+
+/** Read-only reconciliation, pinned to the account that approved this message. */
+export async function findSentMessage(messageId: string, expectedEmail: string) {
+  const url = new URL(api("/messages"));
+  url.searchParams.set("q", `in:sent rfc822msgid:${messageId}`);
+  url.searchParams.set("maxResults", "2");
+  const listed = z.object({ messages: z.array(z.object({ id: z.string() })).default([]), nextPageToken: z.string().optional() })
+    .parse(await googleFetch("read", url, { expectedEmail }));
+  if (listed.nextPageToken || listed.messages.length !== 1) return null;
+  const message = readMessage(await googleFetch("read", api(`/messages/${encodeURIComponent(listed.messages[0].id)}?format=full`), { expectedEmail }));
+  return message.labels.includes("SENT") && message.messageId === messageId ? message : null;
 }
 
 const partSchema: z.ZodType<GmailPart> = z.lazy(() =>

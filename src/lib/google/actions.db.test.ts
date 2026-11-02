@@ -36,6 +36,11 @@ import { googleConnection } from "./account";
 import {
   applySuggestedStatus,
   confirmInterview,
+  confirmGmailSend,
+  checkGmailSend,
+  prepareGmailReply,
+  prepareGmailSend,
+  inspectGmailSend,
   disconnectGoogleAccount,
   dismissEmail,
   linkEmail,
@@ -47,6 +52,7 @@ import {
   saveReplyDraft,
   startDraftingReply,
 } from "./actions";
+import { env } from "@/lib/env";
 import { inboxCount, loadConversation, loadInbox, waitingByApplication } from "./inbox-data";
 
 const prisma = () => db.client!;
@@ -70,6 +76,7 @@ beforeEach(async () => {
       const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
       if (href.startsWith("https://oauth2.googleapis.com/token")) return json({ access_token: "access", expires_in: 3600 });
       if (href.startsWith("https://oauth2.googleapis.com/revoke")) return json({});
+      if (href.endsWith("/messages/send")) return json({ id: "outgoing-1", threadId: "t1" });
       if (href.endsWith("/freeBusy")) return json({ calendars: { primary: { busy: [] } } });
       if (href.includes("/events")) return json({ id: "ev1", htmlLink: "https://calendar.google.com/event?eid=ev1" });
       return new Response("", { status: 404 });
@@ -234,5 +241,30 @@ describe("Settings → Google (E15-1)", () => {
     expect(await googleConnection()).toEqual({ status: "disconnected" });
     // Mail already in Dossier stays.
     expect(await prisma().emailMessage.count()).toBe(3);
+  });
+});
+
+
+describe("reviewed send actions", () => {
+  it("requires a review ID and records only the approved reply", async () => {
+    const prepared = await prepareGmailReply({ emailId: "e1", body: "Tuesday works." });
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) throw new Error("Expected synthetic review");
+    expect(calls.filter(c => c.url.endsWith("/messages/send"))).toHaveLength(0);
+    expect(await confirmGmailSend({ intentId: "e1" })).toMatchObject({ ok: false });
+    expect(await inspectGmailSend({ kind: "REPLY", targetId: "e1" })).toMatchObject({ ok: true, data: { id: prepared.data.id, state: "PREPARED" } });
+    expect(await confirmGmailSend({ intentId: prepared.data.id })).toMatchObject({ ok: true, data: { review: { state: "SENT" } } });
+    expect(await checkGmailSend({ intentId: prepared.data.id })).toMatchObject({ ok: true, data: { review: { state: "SENT" } } });
+    expect(calls.filter(c => c.url.endsWith("/messages/send"))).toHaveLength(1);
+  });
+  it("reports the disabled-send guard without preparing or sending real mail", async () => {
+    Object.assign(env, { DOSSIER_EMAIL_SEND: "off" });
+    try {
+      expect(await prepareGmailSend({ id: "nw" })).toMatchObject({ ok: false, error: expect.stringContaining("disabled") });
+      expect(await prepareGmailReply({ emailId: "e1", body: "Synthetic draft." })).toMatchObject({ ok: false, error: expect.stringContaining("disabled") });
+      expect(await googleConnection()).toMatchObject({ sendDisabled: true });
+      expect(await prisma().emailSendIntent.count()).toBe(0);
+      expect(calls.filter(c => c.url.endsWith("/messages/send"))).toHaveLength(0);
+    } finally { Object.assign(env, { DOSSIER_EMAIL_SEND: undefined }); }
   });
 });
