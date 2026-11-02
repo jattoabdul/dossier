@@ -107,7 +107,8 @@ export function fieldsFromBasics(basics: Basics): Record<ProfileKey, string | nu
   return { ...(fields as Record<BasicsField, string | null>), showAge: basics.showAge ? "true" : null };
 }
 
-export type SkillItem = { id: string; name: string };
+/** `group` is the group it's printed under on resumes, empty for none (#280). */
+export type SkillItem = { id: string; name: string; group: string };
 export type LanguageItem = { id: string; name: string; level: LanguageLevel };
 export type ExperienceItem = DateSpan & {
   id: string;

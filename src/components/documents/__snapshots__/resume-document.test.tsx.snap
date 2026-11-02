@@ -394,7 +394,9 @@ exports[`ResumeDocument > renders the demo profile in Atlas 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -814,7 +816,9 @@ exports[`ResumeDocument > renders the demo profile in Chronicle 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -1234,7 +1238,9 @@ exports[`ResumeDocument > renders the demo profile in Classic 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -1346,7 +1352,9 @@ exports[`ResumeDocument > renders the demo profile in Console 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -2089,7 +2097,9 @@ exports[`ResumeDocument > renders the demo profile in Editorial 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -2509,7 +2519,9 @@ exports[`ResumeDocument > renders the demo profile in Folio 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -2621,7 +2633,9 @@ exports[`ResumeDocument > renders the demo profile in Ledger 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -3364,7 +3378,9 @@ exports[`ResumeDocument > renders the demo profile in Minimal 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -3476,7 +3492,9 @@ exports[`ResumeDocument > renders the demo profile in Modern 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -4219,7 +4237,9 @@ exports[`ResumeDocument > renders the demo profile in Signal 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -4654,7 +4674,9 @@ exports[`ResumeDocument > renders the demo profile in Studio 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>
@@ -4766,7 +4788,9 @@ exports[`ResumeDocument > renders the demo profile in Technical 1`] = `
         <div
           data-unit="skills"
         >
-          <p>
+          <p
+            class="_skillLine_fa1ef7"
+          >
             Interaction design · Design systems · Prototyping · User research · Figma · HTML & CSS · Workshop facilitation
           </p>
         </div>

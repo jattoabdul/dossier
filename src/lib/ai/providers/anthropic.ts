@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
 import { AiError } from "../errors";
-import { BaseProvider, withJsonSchema, type ChatAnswer, type ChatCall, type Effort } from "../provider";
+import { BaseProvider, SCHEMA_REFUSED, withJsonSchema, type ChatAnswer, type ChatCall, type Effort } from "../provider";
 import { keyGuardedFetch } from "./guarded-fetch";
 
 /** Offered when the model list can't be fetched, e.g. before a key is saved. */
@@ -26,10 +26,6 @@ const effortLevels = new Map<string, ReadonlySet<Effort>>();
 // grammar size), so large ones, such as a whole profile, go in the prompt
 // instead (#230).
 const promptSchemas = new Set<string>();
-// The refusals seen ("The compiled grammar is too large", "too many parameters
-// with union types") and documented ("Schema is too complex for compilation"),
-// and the documented limit on optional parameters, whose wording we haven't seen.
-const SCHEMA_REFUSED = /grammar is too large|parameters with union types|optional parameters|schema is too complex/i;
 
 /** Claude through the Messages API with the user's own key. */
 export class AnthropicProvider extends BaseProvider {

@@ -79,7 +79,7 @@ corepack yarn tsx scripts/career-import.mts apply <exact-reviewed-plan-sha256>
 
 Applying the identical imported plan is a no-op; a different plan cannot overwrite an occupied database. A changed source is refused until its new version is deliberately reviewed and re-indexed. An incremental refresh workflow is future work; do not clear the database to refresh a link. Original folders remain the authority during this pilot.
 
-Settings → Your data exports schema 6, including source references, review records and import receipts, and reads older schema versions. Root filesystem locations are installation configuration and are never trusted from imported data. Reading a source requires an indexed ID, a configured root, a regular file with no symlink components, and the recorded checksum. HTML/SVG/binary content is never executed as an application page.
+Settings → Your data exports schema 7, including source references, review records and import receipts, and reads older schema versions. Root filesystem locations are installation configuration and are never trusted from imported data. Reading a source requires an indexed ID, a configured root, a regular file with no symlink components, and the recorded checksum. HTML/SVG/binary content is never executed as an application page.
 
 `personal backup` creates a PostgreSQL custom-format dump with 0600 permissions in `.local-personal/backups/`. JSON and database backups retain the index, not the original files or remote Google Docs. Back up those originals and `.local-personal/` separately to a private destination. Never commit this directory or upload it to the public fork.
 
@@ -96,3 +96,7 @@ If Gmail's response is lost, malformed, or cannot be recorded locally, the attem
 Unresolved attempts survive application deletion. Bulk import and deletion refuse to erase pending send history, and a refused deletion preserves the Google connection. Frozen email/PDF snapshots are private database data; they are excluded from portable JSON exports along with other Gmail data. A full PostgreSQL backup retains this send history. Importing JSON requires fresh review before any send and must not be treated as restoration of an in-flight sending queue.
 
 Tests use disposable synthetic databases and a fake Gmail endpoint. Passing them does not constitute approval to enable real sending.
+
+### Dossier 1.11.0 additions
+
+Skill groups start empty and leave existing resumes unchanged until you group skills. Scoring continues to use the existing AI provider; Jev requires an explicit choice and a TypeSafe key. Imports preserve the local scorer choice and connector authorization. The optional MCP connector supports additional apps alongside the separate local Codex connector. Neither upgrade nor import enables additional connections or image publishing.

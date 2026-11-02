@@ -85,7 +85,8 @@ export function sourcesFor(profile: ProfileData, _extracted: Extracted | null, _
 /** Where sentences start: capitals there are grammar, not names. */
 function sentenceStarts(text: string): Set<number> {
   const starts = new Set<number>([0]);
-  for (const match of text.matchAll(/(?:[.!?:;]["”’)]?\s+|\n)\s*(?:[-*•·]\s+)?(?=\S)/g)) starts.add(match.index + match[0].length);
+  // Trimmed: blank lines at the end, which models sometimes write by the thousand, would make this search slow.
+  for (const match of text.trimEnd().matchAll(/(?:[.!?:;]["”’)]?\s+|\n)\s*(?:[-*•·]\s+)?(?=\S)/g)) starts.add(match.index + match[0].length);
   return starts;
 }
 

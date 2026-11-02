@@ -12,6 +12,7 @@ const HASH_PASSWORD = "Make one with `docker run --rm -it ghcr.io/aientech/dossi
 
 export const AI_PROVIDERS = ["local", "openai", "anthropic", "mistral", "lmstudio"] as const;
 export const JOB_SOURCE_NAMES = ["jsearch", "adzuna", "arbeitsagentur", "freehire", "off"] as const;
+export const SCORER_NAMES = ["ai", "jev"] as const;
 
 // An empty value (`DOSSIER_AI_KEY=` in .env) counts as unset.
 const unsetIfEmpty = (value: unknown) =>
@@ -143,6 +144,17 @@ const schema = z.object({
       .toLowerCase()
       .pipe(z.enum(["on", "off"], { error: (issue) => `DOSSIER_JOBS_ARBEITSAGENTUR must be on or off (got "${String(issue.input)}").` })),
   ),
+  // Defaults for Settings → Scoring (#274), until a choice is saved there:
+  // ai scores postings with the AI provider, jev with TypeSafe's Jev.
+  DOSSIER_SCORER: optional(
+    z
+      .string()
+      .trim()
+      .toLowerCase()
+      .pipe(z.enum(SCORER_NAMES, { error: (issue) => `DOSSIER_SCORER must be one of ${SCORER_NAMES.join(", ")} (got "${String(issue.input)}").` })),
+  ),
+  // Never echo the value: it's an API key.
+  DOSSIER_TYPESAFE_KEY: optional(z.string().trim()),
   // Google sign-in for Gmail and Calendar (E15-1): an OAuth client of type
   // "Web application". Settings → Google can save one instead, which wins.
   // Never echo the secret.
@@ -173,6 +185,11 @@ const schema = z.object({
   // of GitHub's API (e2e/fake-jobs.mts answers).
   DOSSIER_UPDATES_TEST_BASE_URL: optional(
     z.url({ protocol: /^https?$/, error: "DOSSIER_UPDATES_TEST_BASE_URL must be an http:// or https:// URL." }),
+  ),
+  // For the end-to-end tests only: sends Jev's requests to <url> instead of
+  // TypeSafe's API (e2e/fake-jobs.mts answers).
+  DOSSIER_TYPESAFE_TEST_BASE_URL: optional(
+    z.url({ protocol: /^https?$/, error: "DOSSIER_TYPESAFE_TEST_BASE_URL must be an http:// or https:// URL." }),
   ),
 }).check((context) => {
   if (context.value.DOSSIER_JOBS_SOURCE === "arbeitsagentur" && context.value.DOSSIER_JOBS_ARBEITSAGENTUR === "off") {

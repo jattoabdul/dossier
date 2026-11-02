@@ -8,6 +8,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 const port = Number(process.env.FAKE_JOBS_PORT ?? 3998);
 /** The JSearch key the app is given in e2e/support.ts. */
 const JSEARCH_KEY = "e2e-jsearch-key";
+/** The TypeSafe key a spec saves in Settings → Scoring (#274). */
+const TYPESAFE_KEY = "e2e-typesafe-key";
 
 const job = (id: string, title: string, company: string, extra: Record<string, unknown> = {}) => ({
   job_id: id,
@@ -100,6 +102,35 @@ createServer((request, response) => {
     request.on("end", () => {
       pings.push(JSON.parse(body));
       response.writeHead(204).end();
+    });
+    return;
+  }
+  // Jev (DOSSIER_TYPESAFE_TEST_BASE_URL, #274): each question answered from
+  // its id and line, so a spec knows the score: every Score at its top level
+  // but past work one below, a line with "years", "skills" or "experience"
+  // required, and shown when it's about product design or Figma.
+  if (url.pathname === "/typesafe/v1/systemone" && request.method === "POST") {
+    if (request.headers.authorization !== `Bearer ${TYPESAFE_KEY}`) return send(response, 401, { detail: "Invalid API key" });
+    let body = "";
+    request.on("data", (chunk: Buffer) => (body += chunk.toString()));
+    request.on("end", () => {
+      const { questions } = JSON.parse(body) as { questions: Record<string, { type: string; criteria?: unknown[]; instructions: unknown }> };
+      const lineOf = (question: { instructions: unknown }) => String((question.instructions as { line?: string }).line ?? "");
+      const answers = Object.fromEntries(
+        Object.entries(questions).map(([id, question]) => {
+          if (question.type === "score") {
+            const top = (question.criteria?.length ?? 1) - 1;
+            return [id, { type: "score", score: id === "work" ? top - 1 : top, confidence: 0.9, legend: {}, probabilities: {} }];
+          }
+          if (question.type === "choice") {
+            const required = /years|skills|experience/i.test(lineOf(question));
+            return [id, { type: "choice", choice: required ? "required" : "other", confidence: 0.9, probabilities: {} }];
+          }
+          const shown = id.endsWith("Shown") && /product design|figma/i.test(lineOf(question));
+          return [id, { type: "noul", noul: shown ? 0.9 : 0.05 }];
+        }),
+      );
+      send(response, 200, { model: "jev-1.14.0", answers, usage: { input_tokens: 1000, output_tokens: 10 } });
     });
     return;
   }
