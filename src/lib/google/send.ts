@@ -11,7 +11,7 @@ import { loadSettings } from "@/lib/settings-data";
 
 import { loadGoogleAccount } from "./account";
 import { GoogleError } from "./errors";
-import { assertEmailSendingEnabled } from "./gmail";
+import { assertEmailSendingEnabled, replyRecipient } from "./gmail";
 import { activeSendReview, confirmIntent, digest, prepareIntent, sendReview } from "./send-intent";
 import type { Attachment } from "./mime";
 
@@ -99,9 +99,10 @@ export async function prepareReply(emailId: string, body: string, resend = false
   if (!body.trim()) throw new GoogleError("unavailable", "Write the answer first.");
   if (/\[…\]|\[\.\.\.\]/.test(body)) throw new GoogleError("unavailable", "Fill in the parts marked […] first.");
 
-  const to = email.fromName ? `${email.fromName.replace(/[<>"]/g, "")} <${email.fromAddress}>` : email.fromAddress;
+  if ([email.fromName, email.fromAddress, email.subject].some(value => /[\r\n]/.test(value))) throw new GoogleError("unavailable", "The sender, recipient and subject must each fit on one line.");
+  const to = await replyRecipient(email.gmailId, account.email.toLowerCase(), email.threadId);
   const subject = replySubject(email.subject);
-  return sendReview(await prepareIntent({ kind: "REPLY", targetId: emailId, resend, applicationId: email.applicationId, accountEmail: account.email.toLowerCase(), fingerprint: digest({ account: account.email, to, subject, body, thread: email.threadId, messageId: email.messageId }),
+  return sendReview(await prepareIntent({ kind: "REPLY", targetId: emailId, resend, replyRecipientVerified: true, applicationId: email.applicationId, accountEmail: account.email.toLowerCase(), fingerprint: digest({ replyRoutingVersion: 2, account: account.email, to, subject, body, thread: email.threadId, messageId: email.messageId }),
     mail: { from: await sender(account.email), to, subject, body, inReplyTo: email.messageId || undefined }, threadId: email.threadId }));
 }
 

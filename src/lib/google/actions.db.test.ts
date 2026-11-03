@@ -76,6 +76,7 @@ beforeEach(async () => {
       const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
       if (href.startsWith("https://oauth2.googleapis.com/token")) return json({ access_token: "access", expires_in: 3600 });
       if (href.startsWith("https://oauth2.googleapis.com/revoke")) return json({});
+      if (href.endsWith("/messages/g1?format=metadata")) return json({ id: "g1", threadId: "t1", payload: { headers: [{ name: "From", value: "Anna <anna@northwind.example>" }] } });
       if (href.endsWith("/messages/send")) return json({ id: "outgoing-1", threadId: "t1" });
       if (href.endsWith("/freeBusy")) return json({ calendars: { primary: { busy: [] } } });
       if (href.includes("/events")) return json({ id: "ev1", htmlLink: "https://calendar.google.com/event?eid=ev1" });

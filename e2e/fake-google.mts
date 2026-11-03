@@ -155,7 +155,7 @@ createServer(async (request, response) => {
     const id = `sent-${sent.length + 1}`;
     const threadId = body.threadId ?? `thread-${sent.length + 1}`;
     sent.push({ id, threadId, raw, text: textOf(raw), attachments: [...raw.matchAll(/filename="([^"]+)"/g)].map((match) => match[1]) });
-    deliver({ id, threadId, labels: ["SENT"], headers: { From: rawHeader(raw, "From"), To: rawHeader(raw, "To"), Subject: rawHeader(raw, "Subject"), "Message-ID": rawHeader(raw, "Message-ID") }, text: textOf(raw) });
+    deliver({ id, threadId, labels: ["SENT"], headers: { From: rawHeader(raw, "From"), To: rawHeader(raw, "To"), Subject: rawHeader(raw, "Subject"), "Message-ID": loseNextSendResponse ? `<rewritten-${id}@gmail.example>` : rawHeader(raw, "Message-ID"), "X-Dossier-Send-Token": rawHeader(raw, "X-Dossier-Send-Token") }, text: textOf(raw) });
     // The first application gets an answer: an invitation with a question.
     if (sent.length === 1) {
       deliver({
@@ -164,6 +164,7 @@ createServer(async (request, response) => {
         labels: ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
         headers: {
           From: rawHeader(raw, "To"),
+          "Reply-To": "John Doe <recruiter-relay@reply.example.com>",
           To: ACCOUNT,
           Subject: `Re: ${rawHeader(raw, "Subject")}`,
           "Message-ID": "<reply-1@ledgerly.example>",
@@ -181,7 +182,11 @@ createServer(async (request, response) => {
   if (path === `${gmail}/profile`) return send(response, 200, { emailAddress: ACCOUNT, historyId: String(historyId) });
   if (path === `${gmail}/messages`) {
     const messageId = /rfc822msgid:(\S+)/.exec(url.searchParams.get("q") ?? "")?.[1];
-    const matching = messageId ? mailbox.filter(mail => mail.labels.includes("SENT") && mail.headers["Message-ID"] === messageId) : mailbox;
+    const query = url.searchParams.get("q") ?? "";
+    const after = Number(/after:(\d+)/.exec(query)?.[1] ?? 0) * 1000;
+    const before = Number(/before:(\d+)/.exec(query)?.[1] ?? Infinity) * 1000;
+    const matching = mailbox.filter(mail => (!query.includes("in:sent") || mail.labels.includes("SENT")) &&
+      (!messageId || mail.headers["Message-ID"] === messageId) && mail.date > after && mail.date < before);
     return send(response, 200, { messages: [...matching].reverse().map(({ id, threadId }) => ({ id, threadId })), resultSizeEstimate: matching.length });
   }
   if (path === `${gmail}/history`) {

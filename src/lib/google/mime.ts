@@ -8,6 +8,8 @@ export type Attachment = { fileName: string; contentType: string; data: Uint8Arr
 
 export type OutgoingMail = {
   messageId?: string;
+  /** Opaque identity retained independently of provider Message-ID rewriting. */
+  sendToken?: string;
   from: string;
   to: string;
   subject: string;
@@ -62,6 +64,7 @@ export function buildMessage(mail: OutgoingMail, { boundary = `dossier-${randomB
     `Subject: ${encodeHeader(mail.subject)}`,
     `Date: ${date.toUTCString().replace("GMT", "+0000")}`,
     "MIME-Version: 1.0",
+    ...(mail.sendToken ? [`X-Dossier-Send-Token: ${mail.sendToken.replace(/[\r\n]/g, "")}`] : []),
     ...(mail.messageId ? [`Message-ID: ${mail.messageId.replace(/[\r\n]/g, "")}`] : []),
     ...(mail.inReplyTo ? [`In-Reply-To: ${mail.inReplyTo.replace(/[\r\n]/g, "")}`, `References: ${[mail.references, mail.inReplyTo].filter(Boolean).join(" ").replace(/[\r\n]/g, "")}`] : []),
   ];

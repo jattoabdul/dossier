@@ -12,7 +12,7 @@ import { assertEmailSendingEnabled, findSentMessage, sendRawMail } from "./gmail
 import { buildMessage, parseAddress, toBase64Url, type OutgoingMail } from "./mime";
 
 const attachment = z.object({ fileName: z.string(), sha256: z.string(), data: z.string() });
-const payloadSchema = z.object({ raw: z.string(), from: z.string(), to: z.string(), subject: z.string(), body: z.string(), fromName: z.string(), attachments: z.array(attachment), replyThreadId: z.string().optional() });
+const payloadSchema = z.object({ raw: z.string(), from: z.string(), to: z.string(), subject: z.string(), body: z.string(), fromName: z.string(), attachments: z.array(attachment), replyThreadId: z.string().optional(), sendToken: z.uuid().optional(), replyRecipientVerified: z.boolean().optional() });
 export const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export type SendReview = { id: string; state: string; from: string; to: string; subject: string; body: string; attachments: string[] };
 const uncertain = () => new GoogleError("unavailable", "The send outcome is uncertain. Check send status before trying again. No further message will be sent.");
@@ -22,7 +22,7 @@ export function sendReview(intent: EmailSendIntent): SendReview {
   return { id: intent.id, state: intent.state, from: payload.from, to: payload.to, subject: payload.subject, body: payload.body, attachments: payload.attachments.map(a => a.fileName) };
 }
 
-export async function prepareIntent(input: { kind: "APPLICATION" | "REPLY"; targetId: string; applicationId: string | null; accountEmail: string; fingerprint: string; mail: OutgoingMail; threadId?: string; resend?: boolean }) {
+export async function prepareIntent(input: { kind: "APPLICATION" | "REPLY"; targetId: string; applicationId: string | null; accountEmail: string; fingerprint: string; mail: OutgoingMail; threadId?: string; resend?: boolean; replyRecipientVerified?: boolean }) {
   assertEmailSendingEnabled();
   if ([input.mail.from, input.mail.to, input.mail.subject].some(value => /[\r\n]/.test(value))) throw new GoogleError("unavailable", "The sender, recipient and subject must each fit on one line.");
   const scope = `${input.kind}:${input.targetId}`;
@@ -36,10 +36,11 @@ export async function prepareIntent(input: { kind: "APPLICATION" | "REPLY"; targ
       await tx.emailSendIntent.update({ where: { id: existing.id }, data: { scope: null, ...(existing.state === "PREPARED" ? { state: "CANCELLED" } : {}) } });
     }
     const messageId = `<${randomUUID()}@dossier.invalid>`;
-    const raw = toBase64Url(buildMessage({ ...input.mail, messageId }));
+    const sendToken = randomUUID();
+    const raw = toBase64Url(buildMessage({ ...input.mail, messageId, sendToken }));
     // Gmail's raw payload is base64url encoded; keep a conservative size bound.
     if (raw.length > 30 * 1024 * 1024) throw new GoogleError("unavailable", "The email attachments are too large. Use smaller documents before sending.");
-    const payload = { raw, from: input.mail.from, fromName: parseAddress(input.mail.from).name, to: input.mail.to, subject: input.mail.subject, body: input.mail.body,
+    const payload = { raw, sendToken, replyRecipientVerified: input.replyRecipientVerified, from: input.mail.from, fromName: parseAddress(input.mail.from).name, to: input.mail.to, subject: input.mail.subject, body: input.mail.body,
       attachments: (input.mail.attachments ?? []).map(a => ({ fileName: a.fileName, data: Buffer.from(a.data).toString("base64"), sha256: createHash("sha256").update(a.data).digest("hex") })),
       ...(input.threadId ? { replyThreadId: input.threadId } : {}) };
     return tx.emailSendIntent.create({ data: { scope, kind: input.kind, targetId: input.targetId, applicationId: input.applicationId, accountEmail: input.accountEmail, fingerprint: input.fingerprint, messageId, payload } });
@@ -52,7 +53,7 @@ async function requireAccount(intent: EmailSendIntent) {
 }
 
 /** One local transaction records delivery, thread, reply handling and status together. */
-async function recordSent(id: string, sent: { id: string; threadId: string }, deliveredAt?: Date) {
+async function recordSent(id: string, sent: { id: string; threadId: string; messageId?: string }, deliveredAt?: Date) {
   return prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT 1 FROM "EmailSendIntent" WHERE id = ${id} FOR UPDATE`;
     const intent = await tx.emailSendIntent.findUniqueOrThrow({ where: { id } });
@@ -79,7 +80,7 @@ async function recordSent(id: string, sent: { id: string; threadId: string }, de
       await tx.emailMessage.updateMany({ where: { id: intent.targetId }, data: { handledAt: now } });
       await tx.emailMessage.updateMany({ where: { id: intent.targetId, replyDraft: payload.body }, data: { replyDraft: "", replyGaps: [] } });
     }
-    const data = { applicationId: intent.applicationId, direction: "OUTGOING" as const, fromName: payload.fromName, fromAddress: intent.accountEmail, toAddress: payload.to, subject: payload.subject, body: payload.body, messageId: intent.messageId, threadId: sent.threadId, sentAt: now, handledAt: now };
+    const data = { applicationId: intent.applicationId, direction: "OUTGOING" as const, fromName: payload.fromName, fromAddress: intent.accountEmail, toAddress: payload.to, subject: payload.subject, body: payload.body, messageId: sent.messageId || intent.messageId, threadId: sent.threadId, sentAt: now, handledAt: now };
     await tx.emailMessage.upsert({ where: { gmailId: sent.id }, create: { gmailId: sent.id, ...data }, update: data });
     return tx.emailSendIntent.update({ where: { id }, data: { state: "SENT", gmailId: sent.id, threadId: sent.threadId, eventId, sentAt: now } });
   });
@@ -100,6 +101,7 @@ export async function confirmIntent(id: string) {
     if (!source || source.dismissedAt || source.handledAt) throw new GoogleError("unavailable", "This email was removed or already handled. Review it again before sending.");
   }
   const payload = payloadSchema.parse(intent.payload);
+  if (intent.kind === "REPLY" && !payload.replyRecipientVerified) throw new GoogleError("unavailable", "Review this reply again so its recipient can be checked before sending.");
   await accessToken("send", undefined, intent.accountEmail);
   // Do not perform any external write unless this durable compare-and-set wins.
   const claim = await prisma.emailSendIntent.updateMany({ where: { id, state: "PREPARED" }, data: { state: "SENDING", attemptedAt: new Date() } });
@@ -122,9 +124,9 @@ export async function reconcileIntent(id: string) {
   await requireAccount(intent);
   if (intent.state === "SENT" || intent.state === "PREPARED" || intent.state === "CANCELLED") return intent;
   if (intent.gmailId && intent.threadId) return recordSent(id, { id: intent.gmailId, threadId: intent.threadId });
-  const found = await findSentMessage(intent.messageId, intent.accountEmail);
   const payload = payloadSchema.parse(intent.payload);
-  if (!found || parseAddress(found.from).address !== intent.accountEmail || JSON.stringify(emailAddresses(found.to).sort()) !== JSON.stringify(emailAddresses(payload.to).sort()) || found.subject !== payload.subject || found.text.replace(/\r\n/g, "\n").trim() !== payload.body.replace(/\r\n/g, "\n").trim()) throw uncertain();
+  const found = await findSentMessage(intent.messageId, intent.accountEmail, payload.sendToken && intent.attemptedAt ? { token: payload.sendToken, attemptedAt: intent.attemptedAt } : undefined);
+  if (!found || (payload.replyThreadId && found.threadId !== payload.replyThreadId) || parseAddress(found.from).address !== intent.accountEmail || JSON.stringify(emailAddresses(found.to).sort()) !== JSON.stringify(emailAddresses(payload.to).sort()) || found.subject !== payload.subject || found.text.replace(/\r\n/g, "\n").trim() !== payload.body.replace(/\r\n/g, "\n").trim()) throw uncertain();
   return recordSent(id, found, found.date);
 }
 

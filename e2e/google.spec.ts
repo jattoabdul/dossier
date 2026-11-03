@@ -94,16 +94,18 @@ test("connects Google, sends an application through Gmail, and answers the reply
   await expectAccessible(page);
   await answer.fill((await answer.inputValue()).replace("[…]", "three months"));
   await page.getByRole("button", { name: "Review and send" }).click();
+  await expect(page.getByRole("alertdialog", { name: "Send your answer?" })).toContainText("recruiter-relay@reply.example.com");
   await page.getByRole("alertdialog", { name: "Send your answer?" }).getByRole("button", { name: "Send now" }).click();
   await expect(page.getByText("Answered.")).toBeVisible();
   const reply = (await fakeGoogle()).sent[1];
   expect(reply.threadId).toBe(application.threadId);
+  expect(reply.raw).toContain("To: John Doe <recruiter-relay@reply.example.com>");
   expect(reply.raw).toMatch(/^In-Reply-To: <reply-1@ledgerly\.example>\r?$/m);
   expect(reply.raw).toMatch(/^Subject: Re: Application: Senior Product Designer, Payments\r?$/m);
   expect(reply.text).toContain("My notice period is three months.");
   expect(reply.text).toMatch(/Best regards,\r?\nJane Doe$/);
 
-  // A fresh review is immutable and a lost send response stays safe across reload.
+  // The fake rewrites Message-ID and loses the response. Recovery after reload must never POST again.
   await page.goto(`/applications/${ledgerly}?tab=email`);
   await page.getByRole("button", { name: "Send again with Gmail" }).click();
   const review = page.getByRole("alertdialog", { name: "Send this application?" });
@@ -125,6 +127,8 @@ test("connects Google, sends an application through Gmail, and answers the reply
   await expect(review.getByRole("button", { name: "Check send status" })).toBeVisible();
   await review.getByRole("button", { name: "Check send status" }).click();
   await expect(review).toBeHidden();
+  const [recovered] = await sql<{ messageId: string }>(`SELECT "messageId" FROM "EmailMessage" WHERE "gmailId" = $1`, [`sent-${beforeLost + 1}`]);
+  expect(recovered.messageId).toBe(`<rewritten-sent-${beforeLost + 1}@gmail.example>`);
   expect((await fakeGoogle()).sent).toHaveLength(beforeLost + 1);
   expect((await sql<{ count: number }>(`SELECT count(*)::int AS count FROM "EmailSendIntent" WHERE state = 'UNKNOWN'`))[0].count).toBe(0);
 

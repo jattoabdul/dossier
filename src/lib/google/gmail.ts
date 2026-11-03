@@ -1,12 +1,13 @@
 import "server-only";
 
 import { z } from "zod";
+import { isEmailAddress } from "@/lib/application-email";
 import { env } from "@/lib/env";
 
 import { googleFetch } from "./account";
 import { googleUrl } from "./endpoints";
 import { GoogleError, isGone } from "./errors";
-import { decodeHeader, htmlToText } from "./mime";
+import { decodeHeader, htmlToText, parseAddress } from "./mime";
 
 // The parts of the Gmail API Dossier uses (E15-2, E15-3).
 
@@ -25,15 +26,54 @@ export async function sendRawMail(raw: string, { threadId, expectedEmail }: { th
 }
 
 /** Read-only reconciliation, pinned to the account that approved this message. */
-export async function findSentMessage(messageId: string, expectedEmail: string) {
+export async function findSentMessage(messageId: string, expectedEmail: string, recovery?: { token: string; attemptedAt: Date }) {
   const url = new URL(api("/messages"));
   url.searchParams.set("q", `in:sent rfc822msgid:${messageId}`);
   url.searchParams.set("maxResults", "2");
-  const listed = z.object({ messages: z.array(z.object({ id: z.string() })).default([]), nextPageToken: z.string().optional() })
-    .parse(await googleFetch("read", url, { expectedEmail }));
-  if (listed.nextPageToken || listed.messages.length !== 1) return null;
-  const message = readMessage(await googleFetch("read", api(`/messages/${encodeURIComponent(listed.messages[0].id)}?format=full`), { expectedEmail }));
-  return message.labels.includes("SENT") && message.messageId === messageId ? message : null;
+  const listed = sentList.parse(await googleFetch("read", url, { expectedEmail }));
+  // Never resolve an incomplete or ambiguous identity search with a weaker search.
+  if (listed.nextPageToken || listed.messages.length > 1) return null;
+  if (listed.messages.length === 1) {
+    const message = readMessage(await googleFetch("read", api(`/messages/${encodeURIComponent(listed.messages[0].id)}?format=full`), { expectedEmail }));
+    return message.labels.includes("SENT") && message.messageId === messageId ? message : null;
+  }
+  // Old frozen messages cannot be retrofitted with this token. Leave them uncertain.
+  if (!recovery || !z.uuid().safeParse(recovery.token).success || !Number.isFinite(recovery.attemptedAt.getTime())) return null;
+  return findSentByToken(recovery, expectedEmail);
+}
+
+const sentList = z.object({ messages: z.array(z.object({ id: z.string().min(1) })).default([]), nextPageToken: z.string().optional() });
+
+/** Gmail may rewrite Message-ID. An independent random token binds the frozen MIME
+ * to this intent. Time and content alone are deliberately never sufficient. */
+async function findSentByToken({ token, attemptedAt }: { token: string; attemptedAt: Date }, expectedEmail: string) {
+  const start = Math.floor(attemptedAt.getTime() / 1000) - 120;
+  const end = Math.ceil(attemptedAt.getTime() / 1000) + 600;
+  const url = new URL(api("/messages"));
+  // Numeric bounds only: no subject/address search interpolation. Epoch seconds
+  // avoid Gmail's date-only PST interpretation. A bounded incomplete scan fails closed.
+  url.searchParams.set("q", `in:sent after:${start} before:${end}`);
+  url.searchParams.set("maxResults", "100");
+  const listed = sentList.parse(await googleFetch("read", url, { expectedEmail }));
+  if (listed.nextPageToken || listed.messages.length > 100) return null;
+  let found: ReadMail | null = null;
+  for (const { id } of listed.messages) {
+    const raw = messageSchema.parse(await googleFetch("read", api(`/messages/${encodeURIComponent(id)}?format=full`), { expectedEmail }));
+    const headers = raw.payload.headers ?? [];
+    const values = (name: string) => headers.filter(h => h.name.toLowerCase() === name).map(h => h.value);
+    const tokens = values("x-dossier-send-token");
+    if (!tokens.includes(token)) continue;
+    // Multiple copies, malformed headers, missing bodies or extra recipients are
+    // uncertainty, even if one copy otherwise looks right. Never use a snippet.
+    const date = Number(raw.internalDate);
+    if (found || tokens.length !== 1 || !raw.id || !raw.threadId || !raw.labelIds.includes("SENT") ||
+      !Number.isFinite(date) || date <= start * 1000 || date >= end * 1000 ||
+      ["from", "to", "subject", "message-id"].some(name => values(name).length !== 1 || !values(name)[0].trim()) ||
+      ["cc", "bcc"].some(name => values(name).some(value => value.trim())) ||
+      !findPart(raw.payload, "text/plain")) return null;
+    found = readMessage(raw);
+  }
+  return found;
 }
 
 const partSchema: z.ZodType<GmailPart> = z.lazy(() =>
@@ -113,6 +153,26 @@ export function readMessage(json: unknown): ReadMail {
     date: Number.isNaN(date.getTime()) ? new Date() : date,
     text,
   };
+}
+
+/** Resolve the original Gmail headers at review time, including for older imports
+ * that stored only From. Never silently fall back after a malformed Reply-To. */
+export async function replyRecipient(id: string, expectedEmail: string, expectedThreadId: string): Promise<string> {
+  const message = messageSchema.parse(await googleFetch("read", api(`/messages/${encodeURIComponent(id)}?format=metadata`), { expectedEmail }));
+  const unusable = () => new GoogleError("unavailable", "This email has no usable reply address. Open the original message to check how to respond.");
+  if (message.id !== id || message.threadId !== expectedThreadId) throw unusable();
+  const headers = message.payload.headers ?? [];
+  const replies = headers.filter(h => h.name.toLowerCase() === "reply-to");
+  const choices = replies.length ? replies : headers.filter(h => h.name.toLowerCase() === "from");
+  if (choices.length !== 1) throw unusable();
+  // Support one mailbox. Lists/groups and header injection require manual review.
+  const value = decodeHeader(choices[0].value).trim();
+  const parsed = parseAddress(value);
+  if (/[\r\n]/.test(value) || !isEmailAddress(parsed.address) ||
+    /^(?:no[._-]?reply|do[._-]?not[._-]?reply)(?:[+@])/i.test(parsed.address) ||
+    parsed.address === "hit-reply@linkedin.com") throw unusable();
+  const name = parsed.name.replace(/[<>,;"]/g, " ").trim();
+  return name ? `${name} <${parsed.address}>` : parsed.address;
 }
 
 /** One message, or null when it was deleted after Gmail listed it. */

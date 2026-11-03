@@ -35,8 +35,8 @@ const prisma = () => db.client!;
 const b64 = (text: string) => Buffer.from(text).toString("base64url");
 
 /** `history`: when Gmail added it; before the mailbox's 200 unless given. `deleted`: listed, but gone when fetched. */
-type Mail = { id: string; threadId: string; from: string; subject: string; text: string; labels?: string[]; date?: string; history?: number; deleted?: boolean };
-const gmailMessage = ({ id, threadId, from, subject, text, labels = ["INBOX"], date = "2026-10-17T13:02:00Z" }: Mail) => ({
+type Mail = { replyTo?: string; id: string; threadId: string; from: string; subject: string; text: string; labels?: string[]; date?: string; history?: number; deleted?: boolean };
+const gmailMessage = ({ replyTo, id, threadId, from, subject, text, labels = ["INBOX"], date = "2026-10-17T13:02:00Z" }: Mail) => ({
   id,
   threadId,
   labelIds: labels,
@@ -45,6 +45,7 @@ const gmailMessage = ({ id, threadId, from, subject, text, labels = ["INBOX"], d
     mimeType: "multipart/alternative",
     headers: [
       { name: "From", value: from },
+      ...(replyTo !== undefined ? [{ name: "Reply-To", value: replyTo }] : []),
       { name: "To", value: "jane@gmail.com" },
       { name: "Subject", value: subject },
       { name: "Message-ID", value: `<${id}@mail.example>` },
@@ -258,21 +259,21 @@ describe("the inbox check (E15-3)", () => {
 });
 
 /** Model Gmail Sent search from exactly the raw MIME accepted by the fake. */
-function searchableSent({ loseResponse = false, mismatch = false, ambiguous = false, unavailable = false } = {}) {
+function searchableSent({ loseResponse = false, mismatch = false, ambiguous = false, unavailable = false, rewriteId = false, wrongFrom = false, wrongBody = false, wrongThread = false } = {}) {
   const original = fetch;
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
     const u = new URL(String(url));
-    if (u.pathname.endsWith("/messages") && u.searchParams.get("q")?.includes("rfc822msgid:")) {
+    if (u.pathname.endsWith("/messages") && u.searchParams.get("q")?.startsWith("in:sent ")) {
       if (unavailable) return new Response("unavailable", { status: 503 });
-      return Response.json({ messages: sent.map((_, i) => ({ id: `sent-${i + 1}` })), ...(ambiguous ? { nextPageToken: "next" } : {}) });
+      return Response.json({ messages: (rewriteId && u.searchParams.get("q")?.includes("rfc822msgid:") ? [] : sent).map((_, i) => ({ id: `sent-${i + 1}` })), ...(ambiguous ? { nextPageToken: "next" } : {}) });
     }
     if (/messages\/sent-\d+$/.test(u.pathname)) {
       const index = Number(u.pathname.split("-").at(-1)) - 1;
       const raw = Buffer.from(sent[index].raw, "base64url").toString("utf8");
       const header = (name: string) => new RegExp(`^${name}: (.+)`, "m").exec(raw)?.[1].trim() ?? "";
       const body = /Content-Type: text\/plain[^]*?Content-Transfer-Encoding: base64\r\n\r\n([A-Za-z0-9+/=\r\n]+)/.exec(raw)?.[1] ?? "";
-      return Response.json({ id: `sent-${index + 1}`, threadId: sent[index].threadId ?? "thread-new", labelIds: ["SENT"],
-        payload: { mimeType: "text/plain", headers: ["From", "To", "Subject", "Message-ID"].map(name => ({ name, value: mismatch && name === "To" ? "someone-else@example.com" : header(name) })), body: { data: Buffer.from(body, "base64").toString("base64url") } } });
+      return Response.json({ id: `sent-${index + 1}`, threadId: wrongThread ? "wrong-thread" : sent[index].threadId ?? "thread-new", labelIds: ["SENT"], internalDate: String(Date.now()),
+        payload: { mimeType: "text/plain", headers: ["From", "To", "Subject", "Message-ID", "X-Dossier-Send-Token"].map(name => ({ name, value: wrongFrom && name === "From" ? "other@example.com" : rewriteId && name === "Message-ID" ? "<rewritten@gmail.example>" : mismatch && name === "To" ? "someone-else@example.com" : header(name) })), body: { data: wrongBody ? b64("Different body") : Buffer.from(body, "base64").toString("base64url") } } });
     }
     const result = await original(url, init);
     if (loseResponse && u.pathname.endsWith("/messages/send")) throw new Error("lost response");
@@ -281,10 +282,49 @@ function searchableSent({ loseResponse = false, mismatch = false, ambiguous = fa
 }
 
 async function incomingReply() {
+  mailbox.push({ id: "incoming", threadId: "reply-thread", from: "Anna <recruiter@northwind.example>", subject: "Interview", text: "Are you free?" });
   return prisma().emailMessage.create({ data: { gmailId: "incoming", threadId: "reply-thread", applicationId: "nw", direction: "INCOMING", fromAddress: "recruiter@northwind.example", fromName: "Anna", toAddress: "jane@gmail.com", subject: "Interview", body: "Are you free?", messageId: "<incoming@northwind.example>", sentAt: new Date(), replyDraft: "Yes, Tuesday works." } });
 }
 
 describe("durable, reviewed Gmail sends", () => {
+  it("uses the notification Reply-To relay in the review instead of the From address", async () => {
+    const email = await incomingReply();
+    mailbox[0].from = "Recruiter <hit-reply@linkedin.example>";
+    mailbox[0].replyTo = "Recruiter <synthetic-relay@reply.linkedin.example>";
+    await prisma().emailMessage.update({ where: { id: email.id }, data: { fromName: "Recruiter", fromAddress: "hit-reply@linkedin.example" } });
+    const review = await prepareReply(email.id, "Synthetic answer.");
+    expect(review.to).toBe("Recruiter <synthetic-relay@reply.linkedin.example>");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("blocks an old unverified reply review and requires a new recipient review", async () => {
+    const email = await incomingReply();
+    const review = await prepareReply(email.id, "Synthetic answer.");
+    const intent = await prisma().emailSendIntent.findUniqueOrThrow({ where: { id: review.id } });
+    const payload = { ...intent.payload as Record<string, unknown> };
+    delete payload.replyRecipientVerified;
+    await prisma().emailSendIntent.update({ where: { id: review.id }, data: { payload: payload as NonNullable<typeof intent.payload>, fingerprint: "legacy" } });
+    await expect(confirmIntent(review.id)).rejects.toThrow("Review this reply again");
+    expect(sent).toHaveLength(0);
+    const next = await prepareReply(email.id, "Synthetic answer.");
+    expect(next.id).not.toBe(review.id);
+    await expect(confirmIntent(review.id)).rejects.toThrow("uncertain");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("leaves a legacy rewritten-ID send uncertain when no token was frozen", async () => {
+    searchableSent({ loseResponse: true, rewriteId: true });
+    const review = await prepareApplicationEmail("nw");
+    const intent = await prisma().emailSendIntent.findUniqueOrThrow({ where: { id: review.id } });
+    const payload = { ...intent.payload as Record<string, unknown> };
+    delete payload.sendToken;
+    await prisma().emailSendIntent.update({ where: { id: review.id }, data: { payload: payload as NonNullable<typeof intent.payload> } });
+    await expect(confirmIntent(review.id)).rejects.toThrow("uncertain");
+    await expect(reconcileIntent(review.id)).rejects.toThrow("uncertain");
+    await expect(confirmIntent(review.id)).rejects.toThrow("uncertain");
+    expect(sent).toHaveLength(1);
+  });
+
   it("prepares without sending and confirms only the frozen text and PDFs", async () => {
     const review = await prepareApplicationEmail("nw");
     expect(sent).toHaveLength(0);
@@ -356,6 +396,27 @@ describe("durable, reviewed Gmail sends", () => {
     expect((await reconcileIntent(review.id)).state).toBe("SENT");
     expect(sent).toHaveLength(1);
     expect(await prisma().emailMessage.count()).toBe(1);
+  });
+
+  it.each(["APPLICATION", "REPLY"])("recovers a rewritten Message-ID and lost receipt for %s without another POST", async kind => {
+    searchableSent({ loseResponse: true, rewriteId: true });
+    const review = kind === "APPLICATION" ? await prepareApplicationEmail("nw") : await prepareReply((await incomingReply()).id, "Synthetic answer.");
+    await expect(confirmIntent(review.id)).rejects.toThrow("uncertain");
+    expect((await reconcileIntent(review.id)).state).toBe("SENT");
+    expect((await reconcileIntent(review.id)).state).toBe("SENT");
+    expect(sent).toHaveLength(1);
+    expect(await prisma().emailMessage.count({ where: { direction: "OUTGOING" } })).toBe(1);
+    expect((await prisma().emailMessage.findFirstOrThrow({ where: { direction: "OUTGOING" } })).messageId).toBe("<rewritten@gmail.example>");
+  });
+
+  it.each(["recipient", "sender", "body", "thread"])("rejects rewritten-ID recovery with a mismatched %s", async field => {
+    searchableSent({ loseResponse: true, rewriteId: true, mismatch: field === "recipient", wrongFrom: field === "sender", wrongBody: field === "body", wrongThread: field === "thread" });
+    const review = await prepareReply((await incomingReply()).id, "Synthetic answer.");
+    await expect(confirmIntent(review.id)).rejects.toThrow("uncertain");
+    await expect(reconcileIntent(review.id)).rejects.toThrow("uncertain");
+    await expect(confirmIntent(review.id)).rejects.toThrow("uncertain");
+    expect(sent).toHaveLength(1);
+    expect(await prisma().emailMessage.count({ where: { direction: "OUTGOING" } })).toBe(0);
   });
 
   it.each(["empty", "mismatch", "ambiguous", "unavailable"] as const)("does not resend or mark delivered after a %s reconciliation", async failure => {
