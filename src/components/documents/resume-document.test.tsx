@@ -121,6 +121,22 @@ describe("ResumeDocument", () => {
     }
   });
 
+  it("prints a line per skill group, led by its name, those without a group first (#280)", () => {
+    const grouped = {
+      ...profile,
+      skills: profile.skills.map((skill) => ({ ...skill, group: ["Figma", "Prototyping"].includes(skill.name) ? "Tools" : skill.name === "User research" ? "Research" : "" })),
+    };
+    render(<ResumeDocument theme={theme("editorial")} profile={grouped} paper="A4" today={today} />);
+    const lines = [...document.querySelectorAll('[data-unit="skills"] p')];
+    expect(lines.map((line) => line.textContent)).toEqual([
+      "Interaction design · Design systems · HTML & CSS · Workshop facilitation",
+      "Tools: Prototyping · Figma",
+      "Research: User research",
+    ]);
+    expect(within(lines[1] as HTMLElement).getByText("Tools:", { selector: "strong" })).toBeInTheDocument();
+    expect(lines[0].querySelector("strong")).toBeNull();
+  });
+
   it("renders a tailored resume from its units", () => {
     render(<ResumeDocument theme={theme("editorial")} profile={profile} paper="A4" units={demoResumeUnits()} />);
     expect(screen.getByText(/^Senior product designer with nine years of making complex/).closest("[data-unit]")).toHaveAttribute(

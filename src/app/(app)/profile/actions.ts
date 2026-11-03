@@ -91,7 +91,30 @@ const id = z.string().min(1);
 const skillName = z.string().trim().min(1, "Type a skill first.").max(100);
 
 /** Adds a skill (PRO-3). An existing one, in any case, is returned instead of a duplicate. */
-export const addSkill = action(z.object({ name: skillName }), ({ name }) => findOrCreateSkill(name));
+/** A skill group's name (#280): it leads a line on resumes ("Tools: Figma · Ahrefs"), so no ":" or "·". */
+const skillGroup = z
+  .string()
+  .trim()
+  .max(60, "Keep a group's name under 60 characters.")
+  .refine((name) => !/[:·\n]/.test(name), "A group's name can't have “:” or “·” in it.");
+
+/** Adds a skill, in a group or none; one that's there already moves to that group (#280). */
+export const addSkill = action(z.object({ name: skillName, group: skillGroup.default("") }), ({ name, group }) => findOrCreateSkill(name, group));
+
+/** Moves a skill into a group, or out of any (#280). */
+export const setSkillGroup = action(z.object({ id, group: skillGroup }), async ({ id, group }) => {
+  await prisma.skill.updateMany({ where: { id }, data: { group } });
+  return null;
+});
+
+/** Renames a group: its skills move with it, into another group of that name if there is one (#280). */
+export const renameSkillGroup = action(
+  z.object({ from: skillGroup.pipe(z.string().min(1)), to: skillGroup.pipe(z.string().min(1, "Give the group a name.")) }),
+  async ({ from, to }) => {
+    await prisma.skill.updateMany({ where: { group: from }, data: { group: to } });
+    return null;
+  },
+);
 
 /** Removes a skill; the database also detaches it from every role (PRO-3). */
 export const removeSkill = action(z.object({ id }), async ({ id }) => {

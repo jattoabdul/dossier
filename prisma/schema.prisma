@@ -72,6 +72,8 @@ model Skill {
   /// Unique ignoring case ("Figma" and "figma" are the same skill).
   name        String            @unique @db.Citext
   sort        Int               @default(0)
+  /// The group it's printed under on resumes ("Technical SEO"); empty for none (#280).
+  group       String            @default("")
   experiences ExperienceSkill[]
   projects    ProjectSkill[]
   createdAt   DateTime          @default(now())
@@ -726,12 +728,12 @@ model AgentCandidate {
 model PostingScore {
   source     PostingSource
   externalId String
-  /// 0–100 (score-posting).
+  /// 0–100 (score-posting, or Jev).
   score      Int
   /// JSON lists of strings.
   reasons    Json
   redFlags   Json
-  /// The prompt version that scored it, e.g. "score-posting@1".
+  /// What scored it: the prompt version, e.g. "score-posting@1", or Jev's, e.g. "score-posting-jev@1 (jev-1.14.0)".
   scoredWith String
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt

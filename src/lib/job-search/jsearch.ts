@@ -84,7 +84,7 @@ function salaryOf(job: Job): string {
 }
 
 function postedAtOf(job: Job): string | null {
-  const parsed = job.job_posted_at_datetime_utc ? Date.parse(job.job_posted_at_datetime_utc) : NaN;
+  const parsed = job.job_posted_at_datetime_utc ? Date.parse(job.job_posted_at_datetime_utc) : Number.NaN;
   if (!Number.isNaN(parsed)) return new Date(parsed).toISOString();
   return job.job_posted_at_timestamp ? new Date(job.job_posted_at_timestamp * 1000).toISOString() : null;
 }

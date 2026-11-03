@@ -53,6 +53,9 @@ services:
       DOSSIER_ADZUNA_KEY: ${DOSSIER_ADZUNA_KEY:-}
       DOSSIER_FREEHIRE_URL: ${DOSSIER_FREEHIRE_URL:-}
       DOSSIER_JOBS_ARBEITSAGENTUR: ${DOSSIER_JOBS_ARBEITSAGENTUR:-}
+      # Defaults for Settings → Scoring: ai or jev (Jev by TypeSafe, with its key).
+      DOSSIER_SCORER: ${DOSSIER_SCORER:-}
+      DOSSIER_TYPESAFE_KEY: ${DOSSIER_TYPESAFE_KEY:-}
       # Gmail and Calendar: a Google OAuth client (or enter it in Settings → Google).
       DOSSIER_GOOGLE_CLIENT_ID: ${DOSSIER_GOOGLE_CLIENT_ID:-}
       DOSSIER_GOOGLE_CLIENT_SECRET: ${DOSSIER_GOOGLE_CLIENT_SECRET:-}

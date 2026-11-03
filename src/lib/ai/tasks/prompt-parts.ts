@@ -26,7 +26,7 @@ export type TaskResult<T> = { data: T; promptVersion: string };
 export type Task<I, O> = (provider: AIProvider, input: I, options: TaskOptions) => Promise<TaskResult<O>>;
 
 /** Postings longer than this are cut: nothing useful is that long, and prompts must fit local models. */
-const MAX_POSTING_CHARACTERS = 20_000;
+export const MAX_POSTING_CHARACTERS = 20_000;
 
 /**
  * The profile as the model sees it. Only what writing needs: no email,

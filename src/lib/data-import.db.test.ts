@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { decryptApiKey, encryptApiKey } from "@/lib/ai/api-key";
-import { decryptSecret, encryptSecret, JOB_SOURCE_KEY } from "@/lib/secrets";
+import { decryptSecret, encryptSecret, JOB_SOURCE_KEY, TYPESAFE_KEY } from "@/lib/secrets";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { seedBuiltIns } from "../../prisma/seed/built-ins";
@@ -73,6 +73,20 @@ describe("importExport (E10-6)", () => {
     if (!parsed.ok) throw new Error(parsed.error);
     await importExport(prisma(), parsed.data);
     expect(await prisma().application.findFirstOrThrow({ where: { company: "Northstar Health" } })).toMatchObject({ nextInterviewAt: null });
+  });
+
+  it("keeps skill groups, and reads files from before them as having none (#280)", async () => {
+    await prisma().skill.updateMany({ where: { name: "Figma" }, data: { group: "Tools" } });
+    const file = await asFile();
+    expect(file.profile.skills.find((skill) => skill.name === "Figma")).toMatchObject({ group: "Tools" });
+    await importExport(prisma(), file);
+    expect(await prisma().skill.findFirstOrThrow({ where: { name: "Figma" } })).toMatchObject({ group: "Tools" });
+
+    const older = { ...file, schemaVersion: 6, profile: { ...file.profile, skills: file.profile.skills.map((skill) => Object.fromEntries(Object.entries(skill).filter(([key]) => key !== "group"))) } };
+    const parsed = parseExport(JSON.stringify(older));
+    if (!parsed.ok) throw new Error(parsed.error);
+    await importExport(prisma(), parsed.data);
+    expect(await prisma().skill.findFirstOrThrow({ where: { name: "Figma" } })).toMatchObject({ group: "" });
   });
 
   it("deletes every background job, since their inputs and results hold the data it replaces", async () => {
@@ -333,6 +347,44 @@ describe("importExport (E10-6)", () => {
     expect(await value("jsearchKeyEnc")).toBe("ak-from-file");
     expect(await value("adzunaKeyEnc")).toBe("adz-current");
     expect(decryptApiKey((await prisma().setting.findUniqueOrThrow({ where: { key: "apiKeyEnc" } })).value, secret)).toBe("sk-current");
+  });
+
+  it("never exports the TypeSafe key, and keeps this server's on import (#274)", async () => {
+    await prisma().setting.createMany({
+      data: [
+        { key: "typesafeKeyEnc", value: encryptSecret(TYPESAFE_KEY, "ts-current", secret) },
+        { key: "scorer", value: "JEV" },
+      ],
+    });
+    // Not even with the keys asked for: the TypeSafe key belongs to this server.
+    const file = await asFile({ includeApiKey: true });
+    expect(file.settings.map((setting) => setting.key)).not.toContain("typesafeKeyEnc");
+    expect(file.settings.map((setting) => setting.key)).not.toContain("scorer");
+    expect(JSON.stringify(file)).not.toContain("ts-current");
+
+    await importExport(prisma(), { ...file, settings: file.settings.filter((setting) => setting.key !== "scorer") });
+    const kept = await prisma().setting.findUniqueOrThrow({ where: { key: "typesafeKeyEnc" } });
+    expect(decryptSecret(TYPESAFE_KEY, kept.value, secret)).toBe("ts-current");
+    expect(await prisma().setting.findUnique({ where: { key: "scorer" } })).toMatchObject({ value: "JEV" });
+  });
+
+  it("keeps scoring and connector authorization local when importing untrusted settings", async () => {
+    const local = [
+      { key: "scorer", value: "AI" },
+      { key: "connectorRedirects", value: "[]" },
+      { key: "codexTokenHash", value: "local-credential-digest" },
+    ];
+    await prisma().setting.createMany({ data: local });
+    const file = await asFile();
+    await importExport(prisma(), { ...file, settings: [
+      ...file.settings,
+      { key: "scorer", value: "JEV" },
+      { key: "connectorRedirects", value: '["https://untrusted.example/callback"]' },
+      { key: "codexTokenHash", value: "imported-credential-digest" },
+    ] });
+    for (const setting of local) {
+      expect(await prisma().setting.findUnique({ where: { key: setting.key } })).toMatchObject(setting);
+    }
   });
 
   it("points documents at the base theme when their theme isn't in the file", async () => {

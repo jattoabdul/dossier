@@ -145,6 +145,8 @@ Failed sign-ins are rate-limited in Postgres: after 5 failures within a minute f
 
 Dossier reads job postings and writes drafts with the model you choose in Settings → AI provider: a local model through Ollama or llama.cpp, LM Studio, any OpenAI-compatible server, Anthropic or Mistral. Until you save a choice there, the `DOSSIER_AI_*` variables decide (see `.env.example`). API keys are stored encrypted with a key derived from `DOSSIER_SECRET`, and never sent back to the browser.
 
+A server that speaks OpenAI's API with a difference (an address people tend to get wrong, a header it requires, a field every request needs) doesn't need a provider of its own: give it an entry in `src/lib/ai/providers/servers.ts` and a case in `servers.test.ts`. DeepSeek, OpenRouter and OpenCode are there already.
+
 Long AI tasks run as background jobs (`src/lib/jobs`): the page follows their named steps as they happen and picks them up again after a reload. A job's input and result hold personal data, so they don't last: a job that works on an application names it (`startJob(…, { applicationId })`) and is deleted with it, and finished jobs are deleted once they're older than **Keep task data for** in Settings → Your data (`src/lib/jobs/retention.ts`). Keep nothing in a job that has to outlast that; Undo on a toast and a page reattaching after a reload are fine. The prompts live in `src/lib/ai/tasks`; in strict mode ("Never invent experience", on by default) a fact guard flags names and numbers that aren't in the profile or the posting.
 
 To try the AI features without a hosted provider, run a small model in Docker:
@@ -186,6 +188,19 @@ docker compose exec -e JOBS_LIVE=adzuna -e ADZUNA_TEST_APP_ID=… -e ADZUNA_TEST
 docker compose exec -e JOBS_LIVE=freehire app yarn vitest run src/lib/job-search/sources.live.test.ts
 ```
 
+## Scoring
+
+Score in Find jobs and the job agent score postings with what Settings → Scoring chose (`src/lib/scoring`): the AI model's `score-posting` task, or Jev, TypeSafe's System One model, with the user's TypeSafe key. Until a choice is saved, `DOSSIER_SCORER` and `DOSSIER_TYPESAFE_KEY` decide. `loadPostingScorer()` in `index.ts` sets up either one; both give a score from 0 to 100 with up to four reasons and three red flags, and `scoredWith` names what made it.
+
+Jev answers typed questions and writes no text, so `jev.ts` asks, in one request, three Scores about the whole posting (how much of it the profile covers, how close the past work is, the level), three Nouls (a location or permit the profile can't meet, a missing language, a posting too thin to judge) and, for each line `posting-lines.ts` finds (bullets and sentences, wrapped lines joined), whether it's asked of applicants and whether the profile shows it. Code weighs the Scores (`JEV_WEIGHTS`), takes off for the mismatches and quotes the lines: "Covers: …", "Missing: …". `typesafe.ts` is the HTTP client: it retries 429 and 529 and turns failures into an `AiError` with a message for people.
+
+The live tests ask the real Jev with the key saved in Settings → Scoring, or `DOSSIER_TYPESAFE_KEY`, and spend tokens on that account. `check` scores two postings against the demo profile; `compare` scores the job agent's latest 40 candidates again, against the profile in the database, and prints Jev's scores next to the AI model's, what was done with each posting, and the weights that would come closest to the AI model's scores. To compare on your own data, import an export of it into the development app first (Settings → Your data, which backs up what's there):
+
+```bash
+docker compose exec -e JEV_LIVE=check app yarn vitest run src/lib/scoring/jev.live.test.ts
+docker compose exec -e JEV_LIVE=compare app yarn vitest run src/lib/scoring/jev.live.test.ts
+```
+
 ## Your data
 
 Settings → Your data exports everything (profile, custom themes, settings, applications with their history, documents, chat and notes, and the postings kept from Find jobs) as one JSON file, and imports such a file to restore it. An import replaces all data in one transaction, after writing a backup of the current data to `DOSSIER_DATA_DIR/backups` (default `/data`; `./data` in development, which git ignores). "Download all PDFs" zips every tailored document there too, in `downloads`, and removes the zip once it's downloaded.
@@ -200,7 +215,7 @@ Import files are capped at 10 MB, roughly 500 applications. The limit comes from
 
 The job agent (`src/lib/agent`, the `/agent` screen and Settings → Job agent) runs one saved search a day, scores what's new and can prepare drafts:
 
-- **`agent-scan`** (`run.ts`, defined in `jobs.ts` with the key `agent`): one run. It asks the source for the first page only, drops what Find jobs has saved, dismissed or applied for and what the agent has seen (`newPostings()`, by source and id or by `agentDedupeKey()`, a hash of the link without tracking parameters, else of company, title and place), scores the newest of the rest with `score-posting` and keeps each as an `AgentCandidate`.
+- **`agent-scan`** (`run.ts`, defined in `jobs.ts` with the key `agent`): one run. It asks the source for the first page only, drops what Find jobs has saved, dismissed or applied for and what the agent has seen (`newPostings()`, by source and id or by `agentDedupeKey()`, a hash of the link without tracking parameters, else of company, title and place), scores the newest of the rest with the scorer Settings → Scoring chose (`src/lib/scoring`, see [Scoring](#scoring)) and keeps each as an `AgentCandidate`.
 - **`agent-draft`** (`draft.ts`, keyed `agent-candidate:<id>`): one draft. The candidate is claimed (SCORED → DRAFTING → DRAFTED) so nothing makes two, and the documents are written by `createApplicationFromDocuments()` in `src/lib/application-create.ts`, which New application uses too. The draft is `origin: AGENT` with `awaitingReview` set, which keeps it off Applications, the board, the dashboard, the inbox and Find jobs until Approve.
 - **Limits** (`runs.ts`): runs are recorded in the `agentRuns` setting, not as Job rows, which the task-data sweep deletes. At most 3 runs in 24 hours, Run now at most an hour after the last run, and the caps `agentMaxScores` and `agentMaxDrafts` in Settings.
 - **Schedule** (`schedule.ts`): a timer in the process, like the nightly backups, that checks every 15 minutes and starts the day's run after `agentHour` in `lastKnownTimeZone()`. It only works with one instance. At startup, candidates left DRAFTING go back to SCORED.
@@ -242,7 +257,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs lint, type-check and tests with
 docker/bin/yarn build && docker/bin/yarn test:e2e
 ```
 
-The run starts its own server on port 3100 with a separate `dossier_e2e` database (created and migrated on the way, reset to the demo data before the specs that change data), a fake OpenAI-compatible server on port 3999 (`e2e/fake-ai.mts`) that answers each AI task with plausible output, fake job sources on port 3998 (`e2e/fake-jobs.mts`), which the app reaches through `DOSSIER_JOBS_TEST_BASE_URL`, a variable for the tests only, and a fake Google on port 3997 (`e2e/fake-google.mts`) for sign-in, Gmail and Calendar (`DOSSIER_GOOGLE_TEST_BASE_URL`), which only comes into play once a spec enters an OAuth client in Settings → Google. The daily update check asks the same fake instead of GitHub (`DOSSIER_UPDATES_TEST_BASE_URL`), which says no release is out, so a spec can store the latest release itself. Your development server and data are never touched: the tests refuse any database whose name doesn't end in `_e2e`. CI runs them in a job of their own and keeps the report of a failed run as an artifact.
+The run starts its own server on port 3100 with a separate `dossier_e2e` database (created and migrated on the way, reset to the demo data before the specs that change data), a fake OpenAI-compatible server on port 3999 (`e2e/fake-ai.mts`) that answers each AI task with plausible output, fake job sources on port 3998 (`e2e/fake-jobs.mts`), which the app reaches through `DOSSIER_JOBS_TEST_BASE_URL`, a variable for the tests only, and a fake Google on port 3997 (`e2e/fake-google.mts`) for sign-in, Gmail and Calendar (`DOSSIER_GOOGLE_TEST_BASE_URL`), which only comes into play once a spec enters an OAuth client in Settings → Google. The daily update check asks the same fake instead of GitHub (`DOSSIER_UPDATES_TEST_BASE_URL`), which says no release is out, so a spec can store the latest release itself, and so does Jev (`DOSSIER_TYPESAFE_TEST_BASE_URL`), with answers made from the questions. Your development server and data are never touched: the tests refuse any database whose name doesn't end in `_e2e`. CI runs them in a job of their own and keeps the report of a failed run as an artifact.
 
 ## The production image
 

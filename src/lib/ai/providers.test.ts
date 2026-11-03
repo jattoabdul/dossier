@@ -29,6 +29,14 @@ async function failure(promise: Promise<unknown>): Promise<AiError> {
 const ollamaChat = (content: string) => json({ model: "qwen2.5:3b", message: { role: "assistant", content }, done: true });
 const openaiChat = (content: string) =>
   json({ id: "c1", object: "chat.completion", created: 0, model: "gpt", choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }] });
+const thinkingChat = (content: string, finish_reason = "stop") =>
+  json({
+    id: "c1",
+    object: "chat.completion",
+    created: 0,
+    model: "thinker",
+    choices: [{ index: 0, message: { role: "assistant", content, reasoning_content: "Thinking it through…" }, finish_reason }],
+  });
 const mistralChat = (content: unknown, finish_reason = "stop") =>
   json({ id: "c1", object: "chat.completion", created: 0, model: "mistral-medium-latest", choices: [{ index: 0, message: { role: "assistant", content }, finish_reason }] });
 const anthropicMessage = (text: string, stop_reason = "end_turn") =>
@@ -135,6 +143,29 @@ describe("OpenAICompatibleProvider", () => {
     expect(requests[0].body).toMatchObject({ temperature: 0.2, max_tokens: 4096, response_format: { type: "json_schema" } });
   });
 
+  it("puts the schema in the prompt for Ollama's cloud, which takes response_format without holding answers to it (#276)", async () => {
+    // As Ollama's cloud does: whatever response_format says, the model answers in a shape of its own.
+    const requests = stubFetch(({ body }) => {
+      const { messages } = body as { messages: { content: string }[] };
+      return openaiChat(messages[0].content.includes("matches this JSON schema") ? '{"name":"Jane","years":9}' : '{"person":"Jane","experience":"9 years"}');
+    });
+    for (const [url, model] of [
+      ["https://ollama.com/v1", "gpt-oss:120b"],
+      ["http://ollama:11434/v1", "gpt-oss:120b-cloud"],
+    ]) {
+      const provider = new OpenAICompatibleProvider("OPENAI", url, "sk", model, 60_000);
+      expect(await provider.complete({ ...ask, schema: Person, schemaName: "person" })).toEqual({ name: "Jane", years: 9 });
+    }
+    expect(requests).toHaveLength(2);
+    for (const request of requests) expect(request.body).not.toHaveProperty("response_format");
+
+    // Elsewhere the schema stays in response_format, out of the prompt.
+    const provider = new OpenAICompatibleProvider("OPENAI", "http://ollama:11434/v1", null, "qwen2.5:3b", 60_000);
+    await provider.complete({ ...ask, schema: Person, schemaName: "person" }).catch(() => undefined);
+    expect(requests[2].body).toMatchObject({ response_format: { type: "json_schema" } });
+    expect((requests[2].body as { messages: { content: string }[] }).messages[0].content).toBe("Be brief.");
+  });
+
   it("maps HTTP failures to plain words, never the provider's message", async () => {
     const cases: [number, string][] = [
       [401, "auth"],
@@ -162,6 +193,42 @@ describe("OpenAICompatibleProvider", () => {
     stubFetch(() => json({ object: "list", data: [{ id: "b-model", object: "model" }, { id: "a-model", object: "model" }] }));
     const provider = new OpenAICompatibleProvider("OPENAI", "https://api.example.com/v1", "sk", null, 60_000);
     expect(await provider.listModels()).toEqual(["a-model", "b-model"]);
+  });
+
+  it("reaches known servers at their API's address with their headers, and sends no made-up key", async () => {
+    const requests = stubFetch(({ url }) =>
+      url.pathname.endsWith("/models") ? json({ object: "list", data: [{ id: "glm-5.3-flash", object: "model" }] }) : openaiChat("Hello!"),
+    );
+    const go = new OpenAICompatibleProvider("OPENAI", "https://opencode.ai/inference/go/openai/v1", null, "glm-5.3-flash", 60_000);
+    expect(await go.listModels()).toEqual(["glm-5.3-flash"]);
+    expect(requests[0].url.href).toBe("https://opencode.ai/inference/go/v1/models");
+    expect(requests[0].headers.get("authorization")).toBeNull();
+    expect(requests[0].headers.get("x-opencode-session")).toMatch(/^ses_[0-9a-f-]{36}$/);
+    expect(requests[0].headers.get("user-agent")).toMatch(/^Dossier\/\d/);
+
+    const router = new OpenAICompatibleProvider("OPENAI", "https://openrouter.ai/v1", "sk-or", "openrouter/auto", 60_000);
+    expect(await router.complete(ask)).toBe("Hello!");
+    expect(requests[1].url.href).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(requests[1].headers.get("authorization")).toBe("Bearer sk-or");
+    expect(requests[1].headers.has("x-opencode-session")).toBe(false);
+  });
+
+  it("leaves room for thinking once it left the answer none, and from then on", async () => {
+    const requests = stubFetch(({ body }) =>
+      (body as { max_tokens: number }).max_tokens > 4096 ? thinkingChat('{"name":"Jane","years":9}') : thinkingChat("", "length"),
+    );
+    const provider = new OpenAICompatibleProvider("OPENAI", "https://thinker.example/v1", "sk", "glm-5", 60_000);
+    expect(await provider.complete({ ...ask, schema: Person })).toEqual({ name: "Jane", years: 9 });
+    expect(await provider.complete({ ...ask, schema: Person })).toEqual({ name: "Jane", years: 9 });
+    expect(requests.map((request) => (request.body as { max_tokens: number }).max_tokens)).toEqual([4096, 4096 + 12_000, 4096 + 12_000]);
+  });
+
+  it("keeps the usual budget for a model whose thinking leaves room for the answer", async () => {
+    const requests = stubFetch(() => thinkingChat('{"name":"Jane","years":9}'));
+    const provider = new OpenAICompatibleProvider("OPENAI", "https://brief-thinker.example/v1", "sk", "glm-5", 60_000);
+    await provider.complete({ ...ask, schema: Person });
+    await provider.complete({ ...ask, schema: Person });
+    expect(requests.map((request) => (request.body as { max_tokens: number }).max_tokens)).toEqual([4096, 4096]);
   });
 });
 
@@ -463,6 +530,14 @@ describe("LmStudioProvider", () => {
     expect(chats[0]).toMatchObject({ reasoning_effort: "none", max_tokens: 4096 });
     expect(chats[1]).toMatchObject({ max_tokens: 8192 });
     expect(chats[1]).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("leaves thinking only its own room, which fits the context it loads", async () => {
+    const models = [llm("thinker", 131_072, [{ id: "thinker", config: { context_length: 16_384 } }])];
+    const requests = stubFetch(({ url }) => (url.pathname === "/api/v1/models" ? json({ models }) : thinkingChat("", "length")));
+    expect(await failure(make("thinker").complete({ ...ask, schema: Person }))).toMatchObject({ kind: "cut-off" });
+    const chats = requests.filter((request) => request.url.pathname === "/v1/chat/completions");
+    expect(chats.map((request) => (request.body as { max_tokens: number }).max_tokens)).toEqual([8192]);
   });
 
   it("lists chat models only, and sends the token to both APIs", async () => {

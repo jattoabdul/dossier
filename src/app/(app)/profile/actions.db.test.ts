@@ -19,6 +19,7 @@ import {
   removeExperience,
   removeProject,
   removePublication,
+  renameSkillGroup,
   reorderPublications,
   restorePublication,
   savePublication,
@@ -26,6 +27,7 @@ import {
   restoreProject,
   saveProject,
   setProjectSkill,
+  setSkillGroup,
   saveExperience,
   saveReference,
   removeLanguage,
@@ -91,6 +93,28 @@ describe("profile actions", () => {
     const skills = await prisma().skill.findMany({ orderBy: { sort: "asc" } });
     expect(skills.map((skill) => skill.name)).toEqual(["Figma", "User research"]);
     expect(await addSkill({ name: "   " })).toMatchObject({ ok: false, fieldErrors: { name: ["Type a skill first."] } });
+  });
+
+  it("puts skills in groups, moves them, and renames a group with its skills (#280)", async () => {
+    const figma = await addSkill({ name: "Figma", group: "Tools" });
+    expect(figma).toMatchObject({ ok: true, data: { added: true, skill: { name: "Figma", group: "Tools" } } });
+    // One that's there already moves to the group it's added to.
+    expect(await addSkill({ name: "figma", group: "Design" })).toMatchObject({ ok: true, data: { added: false, skill: { name: "Figma", group: "Design" } } });
+    await addSkill({ name: "Prototyping", group: "Design" });
+    await addSkill({ name: "User research" });
+
+    const id = (await prisma().skill.findFirstOrThrow({ where: { name: "User research" } })).id;
+    expect(await setSkillGroup({ id, group: " Research " })).toEqual({ ok: true, data: null });
+    expect(await renameSkillGroup({ from: "Design", to: "Interface" })).toEqual({ ok: true, data: null });
+    const groups = await prisma().skill.findMany({ orderBy: { sort: "asc" }, select: { name: true, group: true } });
+    expect(groups).toEqual([
+      { name: "Figma", group: "Interface" },
+      { name: "Prototyping", group: "Interface" },
+      { name: "User research", group: "Research" },
+    ]);
+
+    expect(await addSkill({ name: "Ahrefs", group: "Tools: SEO" })).toMatchObject({ ok: false, fieldErrors: { group: ["A group's name can't have “:” or “·” in it."] } });
+    expect(await renameSkillGroup({ from: "Interface", to: " " })).toMatchObject({ ok: false, fieldErrors: { to: ["Give the group a name."] } });
   });
 
   it("detaches a removed skill from every role", async () => {
