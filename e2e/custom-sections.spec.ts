@@ -49,6 +49,8 @@ test("moves and removes sections on the Base resume, and it stays that way", asy
   await page.mouse.up();
   await expect.poll(async () => (await titles(page)).indexOf("Languages")).toBeLessThan((await titles(page)).indexOf("Education"));
 
+  // Finish the drag save and drag sensor cleanup before the next click.
+  await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: "Put back Projects" }).click();
   await expect.poll(() => titles(page)).toContain("Projects");
 });

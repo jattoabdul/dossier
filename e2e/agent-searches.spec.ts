@@ -126,6 +126,8 @@ test("a stale tab toggles only enabled and validates the current query's country
   await other.getByRole("button", { name: "Move down: Renamed elsewhere", exact: true }).click();
   await expect(other.getByRole("button", { name: "Move down: Renamed elsewhere", exact: true })).toBeDisabled();
   const currentRow = () => sql(`SELECT id, name, query, sort, enabled FROM "AgentSearch" WHERE id = $1`, [original.id]);
+  // Disabled also means the mutation is in flight; wait for durable order.
+  await expect.poll(async () => (await currentRow())[0]?.sort).toBe(1);
   const [edited] = await currentRow();
   expect(edited).toMatchObject({ name: "Renamed elsewhere", query: { keywords: "Engineer", place: "Utrecht", country: "nl" }, sort: 1, enabled: true });
 

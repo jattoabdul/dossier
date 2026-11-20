@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { useTrackSave } from "@/components/save-tracker";
 import { toast, toastResult } from "@/components/toast";
@@ -123,7 +123,8 @@ export function CustomSectionEditor({
   const track = useTrackSave();
   const [title, setTitle] = useState(section.title);
   const [quick, setQuick] = useState("");
-  const { flush } = useAutosave({ id: section.id, title, format: section.format, countsAs: section.countsAs }, (value) => track(saveCustomSection(value)));
+  const sectionDraft = useMemo(() => ({ id: section.id, title, format: section.format, countsAs: section.countsAs }), [section.id, title, section.format, section.countsAs]);
+  const { flush } = useAutosave(sectionDraft, (value) => track(saveCustomSection(value)));
   const setSection = (change: (current: CustomSection) => CustomSection) =>
     update((current) => ({ ...current, customSections: current.customSections.map((entry) => (entry.id === section.id ? change(entry) : entry)) }));
   const setItems = (change: (items: CustomItem[]) => CustomItem[]) => setSection((current) => ({ ...current, items: change(current.items) }));

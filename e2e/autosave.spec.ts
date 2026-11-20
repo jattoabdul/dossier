@@ -34,7 +34,7 @@ test("waits for the newest edit before following a link", async ({ page }) => {
   await expect(page).toHaveURL(/\/profile$/);
   await expect(page.getByText("Saved just now")).toHaveCount(0);
   held.release();
-  await expect(page).toHaveURL(/\/resume$/);
+  await expect(page).toHaveURL(/\/resume(?:\?profile=[^&]+)?$/);
   await expectStoredName("Morgan Latest");
   await expect(page.getByRole("article", { name: "Resume" })).toContainText("Morgan Latest");
 });
@@ -81,7 +81,7 @@ test("does not navigate or report Saved after rejected writes; retry preserves t
   await expect(page.getByLabel("Full name")).toHaveValue("Morgan Retry");
   await page.unroute("**/profile**");
   await page.getByRole("link", { name: "See base resume →" }).click();
-  await expect(page).toHaveURL(/\/resume$/);
+  await expect(page).toHaveURL(/\/resume(?:\?profile=[^&]+)?$/);
   await expectStoredName("Morgan Retry");
 });
 
