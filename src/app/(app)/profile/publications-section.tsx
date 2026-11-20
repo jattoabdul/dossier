@@ -111,8 +111,9 @@ function PublicationForm({
   onChange: (entry: PublicationItem) => void;
   autoFocus: boolean;
 }) {
+  const profileId = useProfileId();
   const { flush } = useAutosave(entry, savePublication, 500, {
-    key: `publication:${entry.id}`, label: "Publication", restore: onChange,
+    key: `profile:${profileId}:publication:${entry.id}`, legacyKeys: [`publication:${entry.id}`], label: "Publication", restore: onChange,
   });
   const set = (change: Partial<PublicationItem>) => onChange({ ...entry, ...change });
 

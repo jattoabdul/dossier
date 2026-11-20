@@ -46,8 +46,9 @@ function ExperienceForm({
     () => ({ id, role, company, location, descriptor, bullets, startYear, startMonth, endYear, endMonth, current }),
     [id, role, company, location, descriptor, bullets, startYear, startMonth, endYear, endMonth, current],
   );
+  const profileId = useProfileId();
   const { flush } = useAutosave(fields, saveExperience, 500, {
-    key: `experience:${entry.id}`, label: "Experience", restore: (recovered) => onChange({ ...entry, ...recovered }),
+    key: `profile:${profileId}:experience:${entry.id}`, legacyKeys: [`experience:${entry.id}`], label: "Experience", restore: (recovered) => onChange({ ...entry, ...recovered }),
   });
   const set = (change: Partial<ExperienceItem>) => onChange({ ...entry, ...change });
 

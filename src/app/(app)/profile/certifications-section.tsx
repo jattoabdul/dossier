@@ -29,7 +29,10 @@ function CertificationForm({
   autoFocus: boolean;
 }) {
   const track = useTrackSave();
-  const { flush } = useAutosave(entry, (value) => track(saveCertification(value)));
+  const profileId = useProfileId();
+  const { flush } = useAutosave(entry, (value) => track(saveCertification(value)), 500, {
+    key: `profile:${profileId}:certification:${entry.id}`, label: "Certification", restore: onChange,
+  });
   const set = (change: Partial<CertificationItem>) => onChange({ ...entry, ...change });
 
   return (

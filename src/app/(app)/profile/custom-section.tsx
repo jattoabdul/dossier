@@ -41,7 +41,10 @@ function CustomItemForm({
   autoFocus: boolean;
 }) {
   const track = useTrackSave();
-  const { flush } = useAutosave(entry, (value) => track(saveCustomItem({ ...value, sectionId })));
+  const profileId = useProfileId();
+  const { flush } = useAutosave(entry, (value) => track(saveCustomItem({ ...value, sectionId })), 500, {
+    key: `profile:${profileId}:custom:${sectionId}:${entry.id}`, label: "Custom section item", restore: onChange,
+  });
   const set = (change: Partial<CustomItem>) => onChange({ ...entry, ...change });
   const link = (
     <Input
@@ -124,7 +127,13 @@ export function CustomSectionEditor({
   const [title, setTitle] = useState(section.title);
   const [quick, setQuick] = useState("");
   const sectionDraft = useMemo(() => ({ id: section.id, title, format: section.format, countsAs: section.countsAs }), [section.id, title, section.format, section.countsAs]);
-  const { flush } = useAutosave(sectionDraft, (value) => track(saveCustomSection(value)));
+  const { flush } = useAutosave(sectionDraft, (value) => track(saveCustomSection(value)), 500, {
+    key: `profile:${profileId}:custom:${section.id}`, label: "Custom section",
+    restore: (recovered) => {
+      setTitle(recovered.title);
+      setSection((current) => ({ ...current, ...recovered }));
+    },
+  });
   const setSection = (change: (current: CustomSection) => CustomSection) =>
     update((current) => ({ ...current, customSections: current.customSections.map((entry) => (entry.id === section.id ? change(entry) : entry)) }));
   const setItems = (change: (items: CustomItem[]) => CustomItem[]) => setSection((current) => ({ ...current, items: change(current.items) }));

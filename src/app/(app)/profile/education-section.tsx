@@ -21,8 +21,9 @@ function EducationForm({
   onChange: (entry: EducationItem) => void;
   autoFocus: boolean;
 }) {
+  const profileId = useProfileId();
   const { flush } = useAutosave(entry, saveEducation, 500, {
-    key: `education:${entry.id}`, label: "Education", restore: onChange,
+    key: `profile:${profileId}:education:${entry.id}`, legacyKeys: [`education:${entry.id}`], label: "Education", restore: onChange,
   });
   const set = (change: Partial<EducationItem>) => onChange({ ...entry, ...change });
 

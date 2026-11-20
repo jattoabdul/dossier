@@ -18,8 +18,9 @@ function ReferenceForm({
   onChange: (entry: ReferenceItem) => void;
   autoFocus: boolean;
 }) {
+  const profileId = useProfileId();
   const { flush } = useAutosave(entry, saveReference, 500, {
-    key: `reference:${entry.id}`, label: "Reference", restore: onChange,
+    key: `profile:${profileId}:reference:${entry.id}`, legacyKeys: [`reference:${entry.id}`], label: "Reference", restore: onChange,
   });
   const set = (change: Partial<ReferenceItem>) => onChange({ ...entry, ...change });
 

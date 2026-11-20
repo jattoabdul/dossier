@@ -40,8 +40,9 @@ function ProjectForm({
     () => ({ id, name, link, bullets, startYear, startMonth, endYear, endMonth, current }),
     [id, name, link, bullets, startYear, startMonth, endYear, endMonth, current],
   );
+  const profileId = useProfileId();
   const { flush } = useAutosave(fields, saveProject, 500, {
-    key: `project:${entry.id}`, label: "Project", restore: (recovered) => onChange({ ...entry, ...recovered }),
+    key: `profile:${profileId}:project:${entry.id}`, legacyKeys: [`project:${entry.id}`], label: "Project", restore: (recovered) => onChange({ ...entry, ...recovered }),
   });
   const set = (change: Partial<ProjectItem>) => onChange({ ...entry, ...change });
 

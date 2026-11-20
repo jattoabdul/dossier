@@ -17,7 +17,9 @@ import { useProfileId } from "./profile-id";
 export function SummarySection({ basics, onChange }: { basics: Basics; onChange: (basics: Basics) => void }) {
   const profileId = useProfileId();
   const track = useTrackSave();
-  const { flush } = useAutosave(basics, (value) => track(saveBasics({ ...value, profileId })));
+  const { flush } = useAutosave(basics, (value) => track(saveBasics({ ...value, profileId })), 500, {
+    key: `profile:${profileId}:summary`, label: "Profile summary", restore: onChange,
+  });
 
   return (
     <Card className="flex flex-col gap-5">

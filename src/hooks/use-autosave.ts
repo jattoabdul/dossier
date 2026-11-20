@@ -8,7 +8,7 @@ import { PendingSavesContext } from "@/components/save-boundary";
 import { clearAutosaveDraft, readAutosaveDraft, sameDraftValue, writeAutosaveDraft } from "@/lib/autosave-draft";
 
 export type AutosaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
-type RecoveryOptions<T> = { key: string; label: string; restore: (value: T) => void };
+type RecoveryOptions<T> = { key: string; legacyKeys?: string[]; label: string; restore: (value: T) => void };
 
 const COULD_NOT_SAVE =
   "Couldn't save your changes. They're still on this page, and saving will try again when you edit or leave the field.";
@@ -171,7 +171,10 @@ export function useAutosave<T>(
       report.current?.(identity, status, savedAt);
       if (status === "saved" && !conflict.current) {
         base.current = lastSeen.current;
-        if (draft.current) clearAutosaveDraft(draft.current.key);
+        if (draft.current) {
+          clearAutosaveDraft(draft.current.key);
+          for (const key of draft.current.legacyKeys ?? []) clearAutosaveDraft(key);
+        }
       }
     });
   });
@@ -183,9 +186,21 @@ export function useAutosave<T>(
     if (!recoveryChecked.current) {
       recoveryChecked.current = true;
       const options = draft.current;
-      const recovered = options && readAutosaveDraft(options.key, value);
+      let recovered = options && readAutosaveDraft(options.key, value);
+      if (options && !recovered) {
+        for (const key of options.legacyKeys ?? []) {
+          recovered = readAutosaveDraft(key, value);
+          if (recovered) {
+            if (writeAutosaveDraft(options.key, recovered)) clearAutosaveDraft(key);
+            break;
+          }
+        }
+      }
       if (options && recovered) {
-        if (sameDraftValue(recovered.value, value)) clearAutosaveDraft(options.key);
+        if (sameDraftValue(recovered.value, value)) {
+          clearAutosaveDraft(options.key);
+          for (const key of options.legacyKeys ?? []) clearAutosaveDraft(key);
+        }
         else if (sameDraftValue(recovered.base, value)) {
           options.restore(recovered.value);
           saver.change(recovered.value);
@@ -202,6 +217,7 @@ export function useAutosave<T>(
                 saver.change(recovered.value);
               } else {
                 clearAutosaveDraft(options.key);
+                for (const key of options.legacyKeys ?? []) clearAutosaveDraft(key);
                 saver.reportStatus("idle");
               }
             },

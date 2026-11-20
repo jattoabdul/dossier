@@ -75,7 +75,7 @@ export function BasicsSection({
   const profileId = useProfileId();
   const track = useTrackSave();
   const { flush } = useAutosave(basics, (value) => track(saveBasics({ ...value, profileId })), 500, {
-    key: `profile:${profileId}:basics`, label: "Profile basics", restore: onChange,
+    key: `profile:${profileId}:basics`, legacyKeys: profileId === "first" ? ["profile:basics"] : [], label: "Profile basics", restore: onChange,
   });
 
   // Hints show once you've left a field, not while you're typing in it.
