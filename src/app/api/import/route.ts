@@ -5,6 +5,7 @@ import { JobStatus } from "@/generated/prisma/enums";
 import { writeBackup } from "@/lib/backups";
 import { assertNoPendingEmailSends, PendingEmailSends } from "@/lib/google/send-guard";
 import { currentSummary, importExport, parseExport, summarizeExport } from "@/lib/data-import";
+import { freezeSentApplications } from "@/lib/frozen-copy";
 import { IMPORT_MAX_BYTES, IMPORT_TOO_BIG } from "@/lib/import-limits";
 import { cancelJob } from "@/lib/jobs/runner";
 import { prisma } from "@/lib/prisma";
@@ -44,6 +45,8 @@ export const POST = route(async (request) => {
     if (error instanceof PendingEmailSends) return NextResponse.json({ error: error.message }, { status: 409 });
     throw error;
   }
+  await freezeSentApplications();
+
   revalidatePath("/", "layout");
   return NextResponse.json({ incoming, backup });
 });

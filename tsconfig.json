@@ -31,5 +31,6 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", ".local-personal", ".local-demo"]
+  "exclude": ["node_modules", ".local-personal", ".local-demo", "desktop"]
+
 }

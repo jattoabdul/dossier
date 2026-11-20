@@ -1,8 +1,11 @@
 import "server-only";
 
 import { DocumentKind } from "@/generated/prisma/enums";
+
 import { unitsSchema } from "@/lib/application-data";
 import { emailAddresses, emailParts } from "@/lib/application-email";
+import { frozenDataForSend } from "@/lib/frozen-copy";
+import { messageDraftSchema } from "@/lib/message-draft";
 import { resolveFileName } from "@/lib/file-name";
 import { renderPdf } from "@/lib/pdf/render";
 import { prisma } from "@/lib/prisma";
@@ -13,7 +16,8 @@ import { loadGoogleAccount } from "./account";
 import { GoogleError } from "./errors";
 import { assertEmailSendingEnabled, replyRecipient } from "./gmail";
 import { activeSendReview, confirmIntent, digest, prepareIntent, sendReview } from "./send-intent";
-import type { Attachment } from "./mime";
+import { fromLine, type Attachment } from "./mime";
+
 
 // Sending through Gmail (E15-2): the application's email with its PDFs, and
 // answers to employers in their thread. Each send is asked for by the user;
@@ -26,8 +30,7 @@ const PRINTED = [
 
 /** "Jane Doe <jane@gmail.com>", from the profile's name and the account. */
 async function sender(address: string): Promise<string> {
-  const name = (await loadProfileName()).trim().replace(/[<>"]/g, "");
-  return name ? `${name} <${address}>` : address;
+  return fromLine(await loadProfileName(), address);
 }
 
 export type SentApplication = { threadId: string; eventId: string | null; attachments: string[] };
@@ -65,14 +68,15 @@ export async function prepareApplicationEmail(applicationId: string, resend = fa
   }
 
   const from = await sender(account.email);
+  const frozenApplication = await frozenDataForSend(prisma, applicationId);
   if (before !== await applicationSnapshot(applicationId)) throw new GoogleError("unavailable", "The application changed while preparing its attachments. Review it again.");
-  return sendReview(await prepareIntent({ kind: "APPLICATION", targetId: applicationId, applicationId, accountEmail: account.email.toLowerCase(), fingerprint: before, mail: { from, to, subject, body, attachments }, resend }));
+  return sendReview(await prepareIntent({ kind: "APPLICATION", targetId: applicationId, applicationId, accountEmail: account.email.toLowerCase(), fingerprint: before, frozenApplication, mail: { from, to, subject, body, attachments }, resend }));
 }
 
 async function applicationSnapshot(id: string) {
   return digest(await Promise.all([
     prisma.application.findUnique({ where: { id }, include: { documents: { orderBy: { id: "asc" } } } }),
-    loadProfile(), loadSettings(), prisma.theme.findMany({ orderBy: { id: "asc" } }),
+    prisma.application.findUniqueOrThrow({ where: { id }, select: { profileId: true } }).then(app => loadProfile(app.profileId)), loadSettings(), prisma.theme.findMany({ orderBy: { id: "asc" } }),
   ]));
 }
 
@@ -81,6 +85,7 @@ export async function sendApplicationEmail(applicationId: string): Promise<SentA
   const review = await prepareApplicationEmail(applicationId);
   const sent = await confirmIntent(review.id);
   return { threadId: sent.threadId!, eventId: sent.eventId, attachments: review.attachments };
+
 }
 
 /** "Re: …", unless it already is. */
@@ -109,4 +114,27 @@ export async function prepareReply(emailId: string, body: string, resend = false
 export async function sendReply(emailId: string, body: string): Promise<{ applicationId: string | null }> {
   const review = await prepareReply(emailId, body);
   return { applicationId: (await confirmIntent(review.id)).applicationId };
+}
+
+/** Freeze a new follow-up in the reviewed outbox; confirmation is a separate action. */
+export async function prepareApplicationMessage(applicationId: string, resend = false) {
+  assertEmailSendingEnabled();
+  const account = await loadGoogleAccount();
+  if (!account) throw new GoogleError("not-connected", "Connect your Google account first.");
+  const active = await activeSendReview("MESSAGE", applicationId);
+  if (active && (["SENDING", "UNKNOWN"].includes(active.state) || (active.state === "SENT" && !resend))) return active;
+  const application = await prisma.application.findUnique({ where: { id: applicationId } });
+  const draft = messageDraftSchema.safeParse(application?.messageDraft);
+  if (!application || application.archivedAt || !draft.success) throw new GoogleError("unavailable", "Review a message on an active application first.");
+  if (!application.emailThreadId) throw new GoogleError("unavailable", "This application has no Gmail thread. Open it in your mail app instead.");
+  const body = draft.data.body.trim();
+  if (!body || /\[…\]|\[\.\.\.\]/.test(body)) throw new GoogleError("unavailable", "Complete the message before reviewing it.");
+  const latest = await prisma.emailMessage.findFirst({ where: { threadId: application.emailThreadId, direction: "INCOMING" }, orderBy: { sentAt: "desc" } });
+  if (!latest) throw new GoogleError("unavailable", "Check the inbox for the original reply before reviewing this message.");
+  const to = await replyRecipient(latest.gmailId, account.email.toLowerCase(), application.emailThreadId);
+  const subject = replySubject(latest.subject);
+  const messageDraftFingerprint = digest(application.messageDraft);
+  return sendReview(await prepareIntent({ kind: "MESSAGE", targetId: applicationId, applicationId, replyRecipientVerified: true, accountEmail: account.email.toLowerCase(),
+    fingerprint: digest({ messageDraftFingerprint, to, subject, body, thread: application.emailThreadId }), messageDraftFingerprint,
+    mail: { from: await sender(account.email), to, subject, body, inReplyTo: latest.messageId || undefined }, threadId: application.emailThreadId, resend }));
 }

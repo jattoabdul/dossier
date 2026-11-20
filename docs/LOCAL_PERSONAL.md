@@ -51,7 +51,7 @@ Official connection reference: [Codex MCP](https://learn.chatgpt.com/docs/extend
 
 1. **Google Docs:** existing tab links work through the normal signed-in browser. No Dossier OAuth connection is needed just to open them. There is no automatic résumé-tab synchronization.
 2. **Gmail/Calendar:** in Settings → Google, supply a Google OAuth Web application client ID and secret, register the exact redirect shown (`http://127.0.0.1:3401/api/google/callback` for this instance), and complete Google's consent screen yourself. The app's Google feature is for Gmail/Calendar, not Google Docs. Reading and calendar automation are off initially. Review the requested permissions before enabling each feature.
-3. **Email:** sending is explicitly disabled by `DOSSIER_EMAIL_SEND=off`. Leave it off until the separate send-reliability work is completed and sending is authorized. Existing Google credential consent does not override this guard.
+3. **Email:** `DOSSIER_EMAIL_SEND=off` blocks Gmail and notification email. Enabling it requires owner authorization. Google consent alone does not override this guard. Application emails, replies and follow-ups require review of the saved message and a separate confirmation.
 4. **Job search:** select and configure a provider in Settings → Job search before using the built-in search. Pasting a posting and working with Codex does not require one. The scheduled job agent is off.
 5. **In-app AI:** only add an OpenAI API key/model if you want Dossier to invoke that provider itself. Keep credentials out of source files, exports and chats. An OpenAI-compatible local model can be configured later.
 
@@ -79,7 +79,7 @@ corepack yarn tsx scripts/career-import.mts apply <exact-reviewed-plan-sha256>
 
 Applying the identical imported plan is a no-op; a different plan cannot overwrite an occupied database. A changed source is refused until its new version is deliberately reviewed and re-indexed. An incremental refresh workflow is future work; do not clear the database to refresh a link. Original folders remain the authority during this pilot.
 
-Settings → Your data exports schema 7, including source references, review records and import receipts, and reads older schema versions. Root filesystem locations are installation configuration and are never trusted from imported data. Reading a source requires an indexed ID, a configured root, a regular file with no symlink components, and the recorded checksum. HTML/SVG/binary content is never executed as an application page.
+Settings → Your data exports schema 16, including source references, review records and import receipts, and reads older schema versions. Root filesystem locations are installation configuration and are never trusted from imported data. Reading a source requires an indexed ID, a configured root, a regular file with no symlink components, and the recorded checksum. HTML/SVG/binary content is never executed as an application page.
 
 `personal backup` creates a PostgreSQL custom-format dump with 0600 permissions in `.local-personal/backups/`. JSON and database backups retain the index, not the original files or remote Google Docs. Back up those originals and `.local-personal/` separately to a private destination. Never commit this directory or upload it to the public fork.
 
@@ -104,3 +104,12 @@ Tests use disposable synthetic databases and a fake Gmail endpoint. Passing them
 ### Dossier 1.11.0 additions
 
 Skill groups start empty and leave existing resumes unchanged until you group skills. Scoring continues to use the existing AI provider; Jev requires an explicit choice and a TypeSafe key. Imports preserve the local scorer choice and connector authorization. The optional MCP connector supports additional apps alongside the separate local Codex connector. Neither upgrade nor import enables additional connections or image publishing.
+
+
+### Dossier 1.15.1 integration
+
+This fork retains the career library, local Codex bridge, account-bound credentials, truthful save status, browser draft recovery, and reviewed Gmail outbox. New follow-up and offer-response messages use the same durable outbox. Their recipient comes from verified Gmail reply headers. Sent application copies retain the profile and layout captured when the email was reviewed.
+
+The upgrade adds multiple profiles, certifications and custom resume sections, a positions library with configurable portals, interview and offer records, and optional notification channels. Existing profile fields and saved searches migrate into the new structure. Original career files and linked Google Docs stay authoritative. New notification destinations imported from another installation stay paused, and imports cannot replace a locally reviewed portal's routing while retaining its credentials.
+
+Before upgrading a personal installation, take a database dump plus private configuration and file backups, restore the dump to a separate database, and rehearse both schema migrations and startup data conversions there. Run the synthetic PostgreSQL, SQLite and browser tests before updating the personal instance. Keep automatic image, desktop, release and website publishing disabled unless separately authorized.

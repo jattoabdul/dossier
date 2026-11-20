@@ -29,6 +29,20 @@ describe("matchMail", () => {
 
   it("matches the company's name for applicant tracking systems", () => {
     expect(matchMail(mail({ fromName: "Ledgerly Recruiting", fromAddress: "no-reply@greenhouse.io" }), all, new Map())).toEqual({ applicationId: "lg", by: "company" });
+    const ats = { fromAddress: "no-reply@greenhouse.io" };
+    expect(matchMail(mail({ ...ats, subject: "Your application at Northwind Logistics" }), all, new Map())?.applicationId).toBe("nw");
+    expect(matchMail(mail({ ...ats, fromName: "NorthwindLogistics Talent" }), all, new Map())?.applicationId).toBe("nw");
+    expect(matchMail(mail({ fromAddress: "jobs@northwindlogistics.example" }), all, new Map())?.applicationId).toBe("nw");
+  });
+
+  it("matches a company's name only as whole words", () => {
+    const vita = app({ id: "vita", company: "Vita" });
+    const rapp = app({ id: "rapp", company: "Rapp" });
+    const ats = { fromAddress: "no-reply@talent.example" };
+    expect(matchMail(mail({ ...ats, subject: "Interview invitation – Data Engineer" }), [vita, rapp], new Map())).toBeNull();
+    expect(matchMail(mail({ ...ats, subject: "Your application" }), [vita, rapp], new Map())).toBeNull();
+    expect(matchMail(mail({ ...ats, subject: "Northwind is hiring" }), [northwind], new Map())).toBeNull();
+    expect(matchMail(mail({ ...ats, subject: "Your interview with Vita" }), [vita, rapp], new Map())?.applicationId).toBe("vita");
   });
 
   it("doesn't match free mail, drafts or unknown companies", () => {
@@ -53,6 +67,12 @@ describe("matchMail", () => {
   it("does not fall through an ambiguous agency domain to a company guess", () => {
     const otherClient = app({ id: "other", company: "Northwind", emailTo: "recruiter@ledgerly.example" });
     expect(matchMail(mail({ fromAddress: "john@ledgerly.example", subject: "Ledgerly application" }), [ledgerly, otherClient], new Map())).toEqual({ applicationId: null, by: "ambiguous" });
+  });
+
+  it("never matches a new mail to a closed application, but keeps a thread already linked to one (#358)", () => {
+    const closed = app({ id: "old", company: "Ledgerly", emailTo: "jobs@ledgerly.example", status: "REJECTED", updatedAt: new Date("2026-11-15") });
+    expect(matchMail(mail({ fromAddress: "hr@ledgerly.example" }), [closed], new Map())).toBeNull();
+    expect(matchMail(mail({ fromAddress: "hr@ledgerly.example", threadId: "t-old" }), [closed], new Map([["t-old", "old"]]))).toEqual({ applicationId: "old", by: "thread" });
   });
 });
 

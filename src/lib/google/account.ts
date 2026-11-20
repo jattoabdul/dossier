@@ -28,7 +28,29 @@ export type GoogleConnection =
       canUseCalendar: boolean;
       lastSyncAt: Date | null;
       syncProblem: string | null;
+      /** Why the saved access can't be used, so nothing is tried until the user connects again (#136); null when it can. */
+      signInProblem: string | null;
     };
+
+/** Stored in place of the refresh token once Google refuses it, so nothing asks Google again until a new sign-in. */
+const REFUSED = "";
+const SIGN_IN_AGAIN = "Google no longer accepts Dossier's access. Connect your Google account again.";
+const UNREADABLE = "The saved Google access can't be read, probably since DOSSIER_SECRET changed. Connect your Google account again.";
+
+/**
+ * Why the saved refresh token can't be used: Google refused it, or it can't
+ * be decrypted. An unreadable one is kept, since putting the old
+ * DOSSIER_SECRET back makes it work again.
+ */
+function signInProblem(refreshTokenEnc: string): string | null {
+  if (refreshTokenEnc === REFUSED) return SIGN_IN_AGAIN;
+  try {
+    decryptSecret(GOOGLE_TOKEN, refreshTokenEnc);
+    return null;
+  } catch {
+    return UNREADABLE;
+  }
+}
 
 export async function loadGoogleAccount() {
   return prisma.googleAccount.findUnique({ where: { id: ACCOUNT_ID } });
@@ -47,6 +69,7 @@ export async function googleConnection(): Promise<GoogleConnection> {
     canUseCalendar: hasScopes(account.scopes, "calendar"),
     lastSyncAt: account.lastSyncAt,
     syncProblem: account.syncProblem,
+    signInProblem: signInProblem(account.refreshTokenEnc),
   };
 }
 
@@ -64,7 +87,14 @@ export async function saveGoogleAccount({ email, refreshToken, scopes }: { email
   await prisma.googleAccount.upsert({
     where: { id: ACCOUNT_ID },
     create: { id: ACCOUNT_ID, email, refreshTokenEnc, scopes },
-    update: { email, refreshTokenEnc, scopes: merged, ...(sameAccount ? {} : { historyId: null, lastSyncAt: null, syncProblem: null }) },
+    update: {
+      email,
+      refreshTokenEnc,
+      scopes: merged,
+      // A new token after Google refused the old one: its "connect again" is done.
+      ...(refreshToken ? { syncProblem: null } : {}),
+      ...(sameAccount ? {} : { historyId: null, lastSyncAt: null, syncProblem: null }),
+    },
   });
   tokens.clear();
 }
@@ -88,36 +118,58 @@ const tokens = (globalForTokens.googleTokens ??= new Map());
 
 /** A valid access token for the connected account, refreshed when it's about to expire. */
 export async function accessToken(group: ScopeGroup, signal?: AbortSignal, expectedEmail?: string): Promise<string> {
+
   const account = await loadGoogleAccount();
   if (!account) throw new GoogleError("not-connected", "Connect your Google account in Settings → Google first.");
   if (!hasScopes(account.scopes, group)) {
     throw new GoogleError("scope", "Dossier doesn't have that permission yet. Allow it in Settings → Google.");
   }
+  if (account.refreshTokenEnc === REFUSED) throw new GoogleError("revoked", SIGN_IN_AGAIN);
   if (expectedEmail && account.email.toLowerCase() !== expectedEmail.toLowerCase()) throw new GoogleError("not-connected", "The connected account changed. Review the message again.");
   const tokenKey = `${account.email.toLowerCase()}:${account.refreshTokenEnc}`;
   const cached = tokens.get(tokenKey);
+
   if (cached && cached.expires > Date.now() + 60_000) return cached.token;
   let refreshToken: string;
   try {
     refreshToken = decryptSecret(GOOGLE_TOKEN, account.refreshTokenEnc);
   } catch {
-    throw new GoogleError("revoked", "The saved Google access can't be read, probably since DOSSIER_SECRET changed. Connect your Google account again.");
+    throw new GoogleError("revoked", UNREADABLE);
   }
-  const answer = await refreshAccessToken(refreshToken, signal);
-  tokens.set(tokenKey, { token: answer.access_token, expires: Date.now() + answer.expires_in * 1000 });
-  return answer.access_token;
+  try {
+    const answer = await refreshAccessToken(refreshToken, signal);
+    tokens.set(tokenKey, { token: answer.access_token, expires: Date.now() + answer.expires_in * 1000 });
+    return answer.access_token;
+  } catch (error) {
+    throw error instanceof GoogleError && error.problem === "revoked" ? await refused(error, account.refreshTokenEnc) : error;
+  }
+}
+
+/**
+ * Google won't take the saved access again (revoked, expired, or a changed
+ * password): it's dropped and the reason kept, so the scheduled checks stop
+ * until the user connects again (#136).
+ */
+async function refused(error: GoogleError, refreshTokenEnc: string): Promise<GoogleError> {
+  tokens.clear();
+  await prisma.googleAccount.updateMany({ where: { id: ACCOUNT_ID, refreshTokenEnc }, data: { refreshTokenEnc: REFUSED, syncProblem: error.message } });
+  return error;
+
 }
 
 const MAX_BYTES = 30 * 1024 * 1024;
-
 /**
  * Calls a Google API with the account's token and returns its JSON. Errors
- * become GoogleErrors; tokens never reach a message or the log.
+ * become GoogleErrors; tokens never reach a message or the log. With `retry`,
+ * for the inbox check, which nobody waits for: when Google asks for a pause
+ * or has a problem of its own, it's asked again a few times, after a while.
+ * Gmail refuses a share of a long run of requests that way (public issue 68).
  */
 export async function googleFetch<T = unknown>(
   group: ScopeGroup,
   url: string | URL,
-  { method = "GET", body, signal, expectedEmail }: { method?: string; body?: unknown; signal?: AbortSignal; expectedEmail?: string } = {},
+  { method = "GET", body, signal, expectedEmail }: { method?: string; body?: unknown; signal?: AbortSignal; expectedEmail?: string; retry?: boolean } = {},
+
 ): Promise<T> {
   const token = await accessToken(group, signal, expectedEmail);
   if (expectedEmail && (await loadGoogleAccount())?.email.toLowerCase() !== expectedEmail.toLowerCase()) throw new GoogleError("not-connected", "The connected account changed. Review the message again.");
@@ -169,6 +221,7 @@ export async function googleFetch<T = unknown>(
     if (response.status === 403) throw new GoogleError("scope", "Google refused that. Check the permissions in Settings → Google.", `${path}: 403`);
     break;
   }
+
   if (response.status === 404 || response.status === 410) {
     throw new GoogleError("unavailable", "Google couldn't find that. It may have been deleted.", `${path}: ${response.status}`, response.status);
   }

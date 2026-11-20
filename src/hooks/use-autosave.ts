@@ -40,6 +40,7 @@ function failureMessage(result: unknown): string | null {
  * arrive out of order. A failed save is retried once.
  */
 export function createAutosaver<T>({ save: initialSave, delay, onStatus: initialStatus, onFailure }: AutosaverOptions<T>) {
+
   let save = initialSave;
   let onStatus = initialStatus;
   let pending: { value: T } | null = null; // changed, not yet sent
@@ -85,7 +86,7 @@ export function createAutosaver<T>({ save: initialSave, delay, onStatus: initial
   function change(value: T) {
     pending = { value };
     failed = null;
-    onStatus("saving");
+    onStatus("pending");
     clearTimeout(timer);
     timer = setTimeout(flush, delay);
   }
@@ -135,7 +136,7 @@ export function useAutosave<T>(
   save: (value: T) => Promise<unknown>,
   delay = 500,
   recovery?: RecoveryOptions<T>,
-): { status: AutosaveStatus; savedAt: Date | null; flush: () => void } {
+): { status: AutosaveStatus; savedAt: Date | null; flush: () => Promise<boolean> } {
   const track = use(TrackSaveContext);
   const boundary = use(PendingSavesContext);
   const [identity] = useState(() => ({}));
@@ -239,6 +240,6 @@ export function useAutosave<T>(
     };
   }, [saver]);
 
-  const [flush] = useState(() => () => { void saver.flush(); });
+  const [flush] = useState(() => () => saver.flush());
   return { status: state.status, savedAt: state.savedAt, flush };
 }

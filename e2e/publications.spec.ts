@@ -14,7 +14,7 @@ test.beforeAll(async () => {
 
 test("adds a publication with italics and a DOI, and shows it on the base resume", async ({ page }) => {
   await page.goto("/profile?section=publications");
-  await expect(page.getByRole("link", { name: /Publications\s*optional\s*1/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Publications\b.*1 publication/ })).toBeVisible();
   await page.getByRole("button", { name: "+ Add a publication" }).click();
   const citation = page.getByRole("textbox", { name: "Citation" });
   await expect(citation).toBeFocused();
@@ -35,6 +35,7 @@ test("adds a publication with italics and a DOI, and shows it on the base resume
   const savedCitation = "Doe, J. (2024). Calm payouts. *Journal of Studies*, 12(3), 45–67.";
   expect(await sql(`SELECT citation, link FROM "Publication" WHERE citation = $1`, [savedCitation]))
     .toEqual([{ citation: savedCitation, link: "https://doi.org/10.5555/98765" }]);
+
 
   await page.reload();
   await expect(page.getByRole("button", { name: /Doe, J\. \(2024\)\. Calm payouts.*doi\.org\/10\.5555\/98765/ })).toBeVisible();

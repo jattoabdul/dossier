@@ -50,7 +50,7 @@ describe("useAutosave", () => {
     rerender({ value: "Jane H" });
     act(() => vi.advanceTimersByTime(300));
     rerender({ value: "Jane Doe" });
-    expect(result.current.status).toBe("saving");
+    expect(result.current.status).toBe("pending");
     act(() => vi.advanceTimersByTime(499));
     expect(save).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(1));
@@ -88,7 +88,7 @@ describe("useAutosave", () => {
     const { save } = controlledSave();
     const { result, rerender } = setup(save);
     rerender({ value: "Jane Doe" });
-    act(() => result.current.flush());
+    act(() => { void result.current.flush(); });
     expect(save).toHaveBeenCalledExactlyOnceWith("Jane Doe");
     act(() => vi.advanceTimersByTime(1000));
     expect(save).toHaveBeenCalledTimes(1);
@@ -156,7 +156,7 @@ describe("useAutosave", () => {
     expect(result.current.status).toBe("error");
     expect(toast).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^Couldn't save your changes\./));
 
-    act(() => result.current.flush());
+    act(() => { void result.current.flush(); });
     expect(save).toHaveBeenCalledTimes(3);
     expect(save).toHaveBeenLastCalledWith("Jane Doe");
   });

@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, it, vi } from "vitest";
-import { createTestClient, resetDatabase } from "@/test/db";
+import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 import { buildExport } from "@/lib/data-export";
 import { importExport, parseExport } from "@/lib/data-import";
 vi.mock("@/lib/env",()=>({env:{DOSSIER_SECRET:"s".repeat(32)}}));
@@ -18,7 +18,7 @@ it("round trips source checksums, review state and import receipts without chang
 it("preserves the local career links and draft history with 1.10 role context and older local exports", async () => {
  const application = await db.application.create({data:{company:"Harbor Systems",role:"Backend Engineer",title:"Backend Engineer"}});
  const document = await db.document.create({data:{applicationId:application.id,kind:"RESUME",units:[{id:"summary",label:"Summary",text:"Reviewed draft"}],versions:{create:{units:[{id:"summary",label:"Summary",text:"Earlier draft"}],cause:"WRITTEN"}}}});
- await db.experience.create({data:{id:"role",company:"Harbor Systems",descriptor:"Developer tooling team",bullets:"Built a reporting service."}});
+ await db.experience.create({data:{profileId:TEST_PROFILE_ID,id:"role",company:"Harbor Systems",descriptor:"Developer tooling team",bullets:"Built a reporting service."}});
  await db.careerArtifact.create({data:{id:"source",rootKey:"career",relativePath:"interviews/harbor/resume.md",title:"Resume",collection:"harbor",kind:"md",sha256:"b".repeat(64)}});
  await db.careerIntake.create({data:{id:"linked",collection:"harbor",company:"Harbor Systems",applicationId:application.id,sourceStatus:"Owner review pending"}});
  const exported = await buildExport(db);

@@ -62,7 +62,7 @@ export function useSaveTracker(): { status: AutosaveStatus; savedAt: Date | null
     return run;
   }, [boundary, report]);
   const values = [...states.values()];
-  const status = pending > 0 || values.includes("saving") ? "saving"
+  const status = pending > 0 || values.includes("saving") || values.includes("pending") ? "saving"
     : values.includes("error") ? "error" : drafts !== "[]" ? "pending" : savedAt ? "saved" : "idle";
   return { status, savedAt, track };
 }

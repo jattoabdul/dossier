@@ -60,6 +60,7 @@ test("connects Google, sends an application through Gmail, and answers the reply
   await expect(page.getByRole("article", { name: "Email" }).getByRole("group", { name: "Recipient" })).toContainText("careers@example.com");
   await page.getByRole("button", { name: "Send with Gmail" }).click();
   const confirmSend = page.getByRole("alertdialog", { name: "Send this application?" });
+
   await expect(confirmSend).toContainText("FromJane Doe <jane.doe@gmail.example>");
   await expect(confirmSend).toContainText(/Attached.*Resume\.pdf, .*Cover letter\.pdf/);
   await expectAccessible(page);
@@ -95,6 +96,7 @@ test("connects Google, sends an application through Gmail, and answers the reply
   await answer.fill((await answer.inputValue()).replace("[…]", "three months"));
   await page.getByRole("button", { name: "Review and send" }).click();
   await expect(page.getByRole("alertdialog", { name: "Send your answer?" })).toContainText("recruiter-relay@reply.example.com");
+
   await page.getByRole("alertdialog", { name: "Send your answer?" }).getByRole("button", { name: "Send now" }).click();
   await expect(page.getByText("Answered.")).toBeVisible();
   const reply = (await fakeGoogle()).sent[1];
