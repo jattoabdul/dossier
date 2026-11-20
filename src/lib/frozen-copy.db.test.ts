@@ -163,8 +163,11 @@ describe("freezeSentApplications (#299)", () => {
     const own = await draft("SENT", new Date());
     await prisma().application.update({ where: { id: own }, data: { sections: { order: ["skills"], off: [] } } });
     const open = await draft();
+    const lastActivity = new Date("2024-02-01T12:00:00Z");
+    await prisma().application.update({ where: { id: sent }, data: { updatedAt: lastActivity } });
 
     expect(await freezeSentApplications()).toBe(2);
+    expect((await prisma().application.findUniqueOrThrow({ where: { id: sent } })).updatedAt).toEqual(lastActivity);
     expect((await frozenOf(sent)).frozen).not.toBeNull();
     expect((await frozenOf(sent)).sections).toMatchObject({ order: expect.arrayContaining(["summary"]) });
     expect((await frozenOf(own)).sections).toEqual({ order: ["skills"], off: [] });

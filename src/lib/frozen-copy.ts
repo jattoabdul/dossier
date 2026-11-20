@@ -185,13 +185,14 @@ export function unfrozenData(frozen: unknown) {
  * importing it. They keep what they show now; earlier changes can't be undone.
  */
 export async function freezeSentApplications(db: Db = prisma): Promise<number> {
-  const sent = await db.application.findMany({ where: { sentAt: { not: null }, frozen: { equals: Prisma.DbNull } }, select: { id: true, profileId: true } });
+  const sent = await db.application.findMany({ where: { sentAt: { not: null }, frozen: { equals: Prisma.DbNull } }, select: { id: true, profileId: true, updatedAt: true } });
   if (sent.length === 0) return 0;
   // Each from its own profile, read once for all its applications.
   const shared = new Map<string | null, Shared>();
-  for (const { id, profileId } of sent) {
+  for (const { id, profileId, updatedAt } of sent) {
     if (!shared.has(profileId)) shared.set(profileId, await loadShared(db, profileId));
-    await db.application.update({ where: { id }, data: await frozenData(db, id, shared.get(profileId)!) });
+    // Freezing historical copies must not make old opportunities look newly active.
+    await db.application.update({ where: { id }, data: { ...await frozenData(db, id, shared.get(profileId)!), updatedAt } });
   }
   return sent.length;
 }
