@@ -7,6 +7,7 @@ import type { ProfileData, ReferenceItem } from "@/lib/profile";
 import { createReference, removeReference, restoreReference, saveReference } from "./actions";
 import { EntryList } from "./entry-list";
 import type { UpdateProfile } from "./skills-section";
+import { useProfileId } from "./profile-id";
 
 function ReferenceForm({
   entry,
@@ -17,8 +18,9 @@ function ReferenceForm({
   onChange: (entry: ReferenceItem) => void;
   autoFocus: boolean;
 }) {
+  const profileId = useProfileId();
   const { flush } = useAutosave(entry, saveReference, 500, {
-    key: `reference:${entry.id}`, label: "Reference", restore: onChange,
+    key: `profile:${profileId}:reference:${entry.id}`, legacyKeys: [`reference:${entry.id}`], label: "Reference", restore: onChange,
   });
   const set = (change: Partial<ReferenceItem>) => onChange({ ...entry, ...change });
 
@@ -67,6 +69,7 @@ function ReferenceForm({
  * Settings allows it (E10-3), and only then are they sent to the AI (PRD §7).
  */
 export function ReferencesSection({ profile, update }: { profile: ProfileData; update: UpdateProfile }) {
+  const profileId = useProfileId();
   return (
     <EntryList
       items={profile.references}
@@ -77,9 +80,9 @@ export function ReferencesSection({ profile, update }: { profile: ProfileData; u
         subtitle: [entry.relation, entry.company].filter((part) => part.trim()).join(" · "),
         meta: entry.email.trim() || undefined,
       })}
-      create={() => createReference({})}
+      create={() => createReference({ profileId })}
       remove={(entry) => removeReference({ id: entry.id })}
-      restore={(entry) => restoreReference(entry)}
+      restore={(entry) => restoreReference({ ...entry, profileId })}
       renderForm={(entry, { onChange, autoFocus }) => (
         <ReferenceForm entry={entry} onChange={onChange} autoFocus={autoFocus} />
       )}

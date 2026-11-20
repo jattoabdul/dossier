@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearAllAutosaveDrafts, clearAutosaveDraft, readAutosaveDraft, writeAutosaveDraft } from "./autosave-draft";
+import { draftDestination, clearAllAutosaveDrafts, clearAutosaveDraft, readAutosaveDraft, writeAutosaveDraft } from "./autosave-draft";
 
 afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); });
 
@@ -33,4 +33,12 @@ describe("opted-in tab drafts", () => {
     expect(readAutosaveDraft("x", "")).toBeNull();
     expect(() => clearAutosaveDraft("x")).not.toThrow();
   });
+});
+
+it("routes recovery to the owning profile and section while retaining legacy links", () => {
+  expect(draftDestination("profile:second:summary").href).toBe("/profile?section=summary&profile=second");
+  expect(draftDestination("profile:second:certification:item").href).toBe("/profile?section=certifications&profile=second");
+  expect(draftDestination("profile:second:custom:awards:item").href).toBe("/profile?section=custom%3Aawards&profile=second");
+  expect(draftDestination("profile:second:basics").href).toBe("/profile?section=basics&profile=second");
+  expect(draftDestination("publication:old-item").href).toBe("/profile?section=publications");
 });

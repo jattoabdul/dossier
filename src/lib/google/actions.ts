@@ -18,9 +18,11 @@ import { applyStatusChange } from "@/lib/status-changes";
 import { disconnectGoogle, googleConnection } from "./account";
 import { proposeSlots, scheduleInterview } from "./availability";
 import { GoogleError } from "./errors";
+import { worthSuggesting } from "./matching";
 import { loadGoogleClientConfig } from "./oauth";
-import { prepareApplicationEmail, prepareReply } from "./send";
+import { prepareApplicationEmail, prepareApplicationMessage, prepareReply } from "./send";
 import { activeSendReview, confirmIntent, reconcileIntent, sendReview } from "./send-intent";
+
 import { formatSlot } from "./slots";
 import { checkInboxNow, readReply } from "./sync";
 
@@ -125,11 +127,14 @@ export const checkInbox = action(z.object({}), async (_, { toast }) => {
   const result = await google(checkInboxNow);
   refreshEverything();
   if (!result) toast("Already checking. It'll be done in a moment.");
-  else toast(result.kept === 0 ? "Nothing new about your applications." : `${result.kept} new ${result.kept === 1 ? "email" : "emails"} about your applications.`);
+  else {
+    const news = result.kept === 0 ? "Nothing new about your applications." : `${result.kept} new ${result.kept === 1 ? "email" : "emails"} about your applications.`;
+    toast(result.unread ? `${news} ${result.unread} couldn't be read from Gmail; the next check tries again.` : news);
+  }
   return result;
 });
 
-export const inspectGmailSend = action(z.object({ kind: z.enum(["APPLICATION", "REPLY"]), targetId: z.string().min(1) }), async ({ kind, targetId }) => activeSendReview(kind, targetId));
+export const inspectGmailSend = action(z.object({ kind: z.enum(["APPLICATION", "REPLY", "MESSAGE"]), targetId: z.string().min(1) }), async ({ kind, targetId }) => activeSendReview(kind, targetId));
 
 /** Freezes the message and attachments before the user reviews them. */
 export const prepareGmailSend = action(z.object({ id: z.string().min(1), resend: z.boolean().default(false) }), async ({ id, resend }) => google(() => prepareApplicationEmail(id, resend)));
@@ -149,6 +154,9 @@ export const checkGmailSend = action(z.object({ intentId: z.string().uuid() }), 
   if (sent.state === "SENT") toast("The message was sent. Dossier is up to date.");
   return { review: sendReview(sent), eventId: sent.eventId };
 });
+
+/** Review a frozen follow-up; only confirmGmailSend can send it. */
+export const prepareGmailMessage = action(z.object({ id: z.string().min(1), resend: z.boolean().default(false) }), async ({ id, resend }) => google(() => prepareApplicationMessage(id, resend)));
 
 /** Drafts (or redrafts) the answer to an email in the background. */
 export const startDraftingReply = action(
@@ -177,7 +185,7 @@ export const markHandled = action(z.object({ emailId: z.string().min(1), handled
   return null;
 });
 
-/** Links a mail to an application ("Needs a look"), with the rest of its thread. Null unlinks. */
+/** Links a mail to an application, with the rest of its thread: from "Needs a look", or moved from another (public #134). Null unlinks. */
 export const linkEmail = action(z.object({ emailId: z.string().min(1), applicationId: z.string().min(1).nullable() }), async ({ emailId, applicationId }, { toast }) => {
   const email = await prisma.emailMessage.findUnique({ where: { id: emailId }, select: { threadId: true } });
   if (!email) throw new ActionError("That email is no longer in Dossier.");
@@ -185,7 +193,7 @@ export const linkEmail = action(z.object({ emailId: z.string().min(1), applicati
   // Mail dismissed before has nothing left to show, so it stays dismissed.
   await prisma.emailMessage.updateMany({ where: { threadId: email.threadId, dismissedAt: null }, data: { applicationId } });
   refreshEverything();
-  toast(applicationId ? "Linked. Replies in this thread will go there too." : "Unlinked.");
+  toast(applicationId ? "Linked. Replies in this thread will go there too." : "Unlinked. It's under Needs a look in the inbox.");
   return null;
 });
 
@@ -232,10 +240,16 @@ export const rereadEmail = action(z.object({ emailId: z.string().min(1) }), asyn
 
 /** Takes up a reply's suggested status (or turns it down), through the status module. */
 export const applySuggestedStatus = action(z.object({ emailId: z.string().min(1), accept: z.boolean() }), async ({ emailId, accept }, { toast }) => {
-  const email = await prisma.emailMessage.findUnique({ where: { id: emailId }, select: { applicationId: true, suggestedStatus: true } });
+  const email = await prisma.emailMessage.findUnique({
+    where: { id: emailId },
+    select: { applicationId: true, suggestedStatus: true, application: { select: { status: true } } },
+  });
   if (!email) throw new ActionError("That email is no longer in Dossier.");
   await prisma.emailMessage.update({ where: { id: emailId }, data: { suggestedStatus: null } });
-  if (!accept || !email.applicationId || !email.suggestedStatus) return { eventId: null };
+  // Checked again against where the application is now, so a suggestion made
+  // before it moved on never takes it backwards (#141).
+  if (!accept || !email.applicationId || !email.suggestedStatus || !email.application) return { eventId: null };
+  if (!worthSuggesting(email.application.status, email.suggestedStatus)) return { eventId: null };
   const result = await applyStatusChange(prisma, email.applicationId, email.suggestedStatus);
   refreshEverything();
   if (result.outcome !== "changed") return { eventId: null };

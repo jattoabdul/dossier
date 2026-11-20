@@ -50,7 +50,7 @@ describe("useAutosave", () => {
     rerender({ value: "Jane H" });
     act(() => vi.advanceTimersByTime(300));
     rerender({ value: "Jane Doe" });
-    expect(result.current.status).toBe("saving");
+    expect(result.current.status).toBe("pending");
     act(() => vi.advanceTimersByTime(499));
     expect(save).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(1));
@@ -88,7 +88,7 @@ describe("useAutosave", () => {
     const { save } = controlledSave();
     const { result, rerender } = setup(save);
     rerender({ value: "Jane Doe" });
-    act(() => result.current.flush());
+    act(() => { void result.current.flush(); });
     expect(save).toHaveBeenCalledExactlyOnceWith("Jane Doe");
     act(() => vi.advanceTimersByTime(1000));
     expect(save).toHaveBeenCalledTimes(1);
@@ -156,7 +156,7 @@ describe("useAutosave", () => {
     expect(result.current.status).toBe("error");
     expect(toast).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^Couldn't save your changes\./));
 
-    act(() => result.current.flush());
+    act(() => { void result.current.flush(); });
     expect(save).toHaveBeenCalledTimes(3);
     expect(save).toHaveBeenLastCalledWith("Jane Doe");
   });
@@ -193,4 +193,29 @@ describe("SavedIndicator", () => {
     expect(screen.getByText("Couldn't save")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Couldn't save your changes.");
   });
+});
+
+it("recovers a legacy entry draft under its profile key and clears it only after saving", async () => {
+  vi.useFakeTimers();
+  sessionStorage.clear();
+  const legacy = "dossier:autosave:v1:experience:entry";
+  const scoped = "dossier:autosave:v1:profile:second:experience:entry";
+  sessionStorage.setItem(legacy, JSON.stringify({ base: "Jane", value: "Jane recovered" }));
+  const { save, calls } = controlledSave();
+  const restore = vi.fn();
+  const { result, rerender, unmount } = renderHook(({ value }) => useAutosave(value, save, 500, {
+    key: "profile:second:experience:entry", legacyKeys: ["experience:entry"], label: "Experience", restore,
+  }), { initialProps: { value: "Jane" } });
+  expect(restore).toHaveBeenCalledWith("Jane recovered");
+  expect(sessionStorage.getItem(legacy)).toBeNull();
+  expect(sessionStorage.getItem(scoped)).not.toBeNull();
+  rerender({ value: "Jane recovered" });
+  act(() => vi.advanceTimersByTime(500));
+  expect(save).toHaveBeenCalledExactlyOnceWith("Jane recovered");
+  await act(async () => calls[0].resolve());
+  expect(result.current.status).toBe("saved");
+  expect(sessionStorage.getItem(scoped)).toBeNull();
+  unmount();
+  sessionStorage.clear();
+  vi.useRealTimers();
 });

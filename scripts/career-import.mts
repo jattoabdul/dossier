@@ -71,16 +71,21 @@ if (process.argv[2] === "index") {
     else {
       await db.$transaction(async tx=>{
         if(await tx.profileField.count() || await tx.application.count() || await tx.careerArtifact.count() || await tx.experience.count() || await tx.skill.count() || await tx.project.count() || await tx.education.count()) throw new Error("The target contains personal data. Refusing to overwrite it.");
-        await tx.profileField.createMany({data:Object.entries(plan.profile.fields).map(([key,value])=>({key,value:String(value)}))});
-        await tx.skill.createMany({data:plan.profile.skills.map((name:string,sort:number)=>({name,sort}))});
-        await tx.experience.createMany({data:plan.profile.experience});
-        await tx.project.createMany({data:plan.profile.projects});
-        await tx.education.createMany({data:plan.profile.education});
+        const profiles = await tx.profile.findMany();
+        if (profiles.length > 1 || profiles.some(profile => profile.id !== "first" || profile.headline || profile.summary || !["", "My profile"].includes(profile.name)) || await tx.certification.count() || await tx.customSection.count() || await tx.publication.count() || await tx.reference.count() || await tx.fact.count() || await tx.language.count()) throw new Error("The target contains profile data. Refusing to overwrite it.");
+        const profileId = "first";
+        const profile = { name: String(plan.profile.fields.headline || "My profile").slice(0,80), headline: String(plan.profile.fields.headline || ""), summary: String(plan.profile.fields.summary || ""), settings: { experienceOrder: "manual", projectOrder: "manual" } };
+        await tx.profile.upsert({ where: { id: profileId }, create: { id: profileId, ...profile }, update: profile });
+        await tx.profileField.createMany({data:Object.entries(plan.profile.fields).filter(([key])=>!["headline","summary"].includes(key)).map(([key,value])=>({key,value:String(value)}))});
+        await tx.skill.createMany({data:plan.profile.skills.map((name:string,sort:number)=>({name,sort,profileId}))});
+        await tx.experience.createMany({data:plan.profile.experience.map((entry:object)=>({...entry,profileId}))});
+        await tx.project.createMany({data:plan.profile.projects.map((entry:object)=>({...entry,profileId}))});
+        await tx.education.createMany({data:plan.profile.education.map((entry:object)=>({...entry,profileId}))});
         await tx.fact.createMany({data:plan.profile.facts.map((text:string,sort:number)=>({text,sort}))});
         await tx.careerArtifact.createMany({data:plan.files});
         await tx.careerIntake.createMany({data:plan.intakes});
         await tx.careerImport.create({data:{id:hash,report:{source:plan.profile.source,review:plan.profile.review,files:plan.files.length,collections:plan.intakes.length,originalsUnchanged:true}}});
-        for(const [key,value] of Object.entries({updateCheck:"false",gmailRead:"false",calendarAvailability:"false",calendarEvents:"false",agentEnabled:"false",agentAutoDraft:"false",experienceOrder:"manual",projectOrder:"manual",workTimeZone:layout.workTimeZone})) await tx.setting.upsert({where:{key},create:{key,value},update:{value}});
+        for(const [key,value] of Object.entries({updateCheck:"false",gmailRead:"false",calendarAvailability:"false",calendarEvents:"false",agentEnabled:"false",agentAutoDraft:"false",workTimeZone:layout.workTimeZone})) await tx.setting.upsert({where:{key},create:{key,value},update:{value}});
       },{timeout:30_000});
       await save("IMPORT-RECEIPT.json",JSON.stringify({planHash:hash,importedAt:new Date().toISOString(),artifacts:plan.files.length,collections:plan.intakes.length,applicationsCreated:0,sourceHashesVerified:true},null,2));
       console.log("Reviewed import committed. Original sources verified unchanged. Statuses await review in Career library.");

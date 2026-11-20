@@ -5,16 +5,18 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { useAutosave } from "@/hooks/use-autosave";
 import type { ProfilePhoto } from "@/lib/photo";
 import { ageOn, isOptionalBasic, type Basics, type BasicsField } from "@/lib/profile";
 
 import { saveBasics } from "./actions";
 import { PhotoField } from "./photo-field";
+import { useTrackSave } from "@/components/save-tracker";
+import { useProfileId } from "./profile-id";
+
 
 type FieldSpec = {
-  field: Exclude<BasicsField, "summary">;
+  field: Exclude<BasicsField, "summary" | "headline">;
   label: string;
   wide?: boolean;
   placeholder?: string;
@@ -25,7 +27,6 @@ type FieldSpec = {
 // PRO-1, in the prototype's order and layout.
 const FIELDS: FieldSpec[] = [
   { field: "name", label: "Full name", wide: true, placeholder: "John Doe", autoComplete: "name" },
-  { field: "headline", label: "Headline", wide: true, placeholder: "Senior Product Designer" },
   { field: "email", label: "Email", type: "email", placeholder: "john.doe@example.com", autoComplete: "email" },
   { field: "phone", label: "Phone", type: "tel", placeholder: "+1 555 010 0000", autoComplete: "tel" },
   { field: "dob", label: "Date of birth", type: "date", autoComplete: "bday" },
@@ -71,9 +72,12 @@ export function BasicsSection({
   photo: ProfilePhoto | null;
   onPhotoChange: (photo: ProfilePhoto | null) => void;
 }) {
-  const { flush } = useAutosave(basics, saveBasics, 500, {
-    key: "profile:basics", label: "Profile basics", restore: onChange,
+  const profileId = useProfileId();
+  const track = useTrackSave();
+  const { flush } = useAutosave(basics, (value) => track(saveBasics({ ...value, profileId })), 500, {
+    key: `profile:${profileId}:basics`, legacyKeys: profileId === "first" ? ["profile:basics"] : [], label: "Profile basics", restore: onChange,
   });
+
   // Hints show once you've left a field, not while you're typing in it.
   const [visited, setVisited] = useState<Set<BasicsField>>(new Set());
 
@@ -101,15 +105,6 @@ export function BasicsSection({
           hint={visited.has(field) ? formatHint(field, basics[field]) : undefined}
         />
       ))}
-      <Textarea
-        className="col-span-2"
-        label="A few lines about you"
-        placeholder="What you do, what you're good at, what you're looking for."
-        rows={4}
-        value={basics.summary}
-        onChange={(event) => set("summary", event.target.value)}
-        onBlur={() => leave("summary")}
-      />
       <Checkbox
         className="col-span-2 pt-1"
         label={

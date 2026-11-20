@@ -1,4 +1,5 @@
 import "server-only";
+import { usesSqlite } from "@/lib/database";
 import type { Prisma } from "@/generated/prisma/client";
 
 export class PendingEmailSends extends Error {
@@ -11,6 +12,6 @@ export async function assertNoPendingEmailSends(db: Pick<Prisma.TransactionClien
 
 /** Also blocks a concurrent claim until the replacement transaction commits. */
 export async function guardEmailSendHistory(tx: Prisma.TransactionClient) {
-  await tx.$executeRaw`LOCK TABLE "EmailSendIntent" IN SHARE ROW EXCLUSIVE MODE`;
+  if (!usesSqlite()) await tx.$executeRaw`LOCK TABLE "EmailSendIntent" IN SHARE ROW EXCLUSIVE MODE`;
   await assertNoPendingEmailSends(tx);
 }

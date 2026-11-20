@@ -10,6 +10,7 @@ import { createEducation, removeEducation, reorderEntries, restoreEducation, sav
 import { EntryList } from "./entry-list";
 import { MonthYearField } from "./month-year-field";
 import type { UpdateProfile } from "./skills-section";
+import { useProfileId } from "./profile-id";
 
 function EducationForm({
   entry,
@@ -20,8 +21,9 @@ function EducationForm({
   onChange: (entry: EducationItem) => void;
   autoFocus: boolean;
 }) {
+  const profileId = useProfileId();
   const { flush } = useAutosave(entry, saveEducation, 500, {
-    key: `education:${entry.id}`, label: "Education", restore: onChange,
+    key: `profile:${profileId}:education:${entry.id}`, legacyKeys: [`education:${entry.id}`], label: "Education", restore: onChange,
   });
   const set = (change: Partial<EducationItem>) => onChange({ ...entry, ...change });
 
@@ -74,6 +76,7 @@ function EducationForm({
 
 /** Education (PRO-7): degrees, courses and certificates. */
 export function EducationSection({ profile, update, order }: { profile: ProfileData; update: UpdateProfile; order: EntryOrder }) {
+  const profileId = useProfileId();
   return (
     <EntryList
       items={profile.education}
@@ -81,17 +84,17 @@ export function EducationSection({ profile, update, order }: { profile: ProfileD
       addLabel="Add education"
       ordering={{
         mode: order,
-        save: (ids) => reorderEntries({ section: "education", ids }),
-        sortByDate: () => sortEntriesByDate({ section: "education" }),
+        save: (ids) => reorderEntries({ profileId, section: "education", ids }),
+        sortByDate: () => sortEntriesByDate({ profileId, section: "education" }),
       }}
       summary={(entry) => ({
         title: entry.degree.trim() || "New entry",
         subtitle: entry.school.trim(),
         meta: formatDateRange(entry),
       })}
-      create={() => createEducation({})}
+      create={() => createEducation({ profileId })}
       remove={(entry) => removeEducation({ id: entry.id })}
-      restore={(entry) => restoreEducation(entry)}
+      restore={(entry) => restoreEducation({ ...entry, profileId })}
       renderForm={(entry, { onChange, autoFocus }) => (
         <EducationForm entry={entry} onChange={onChange} autoFocus={autoFocus} />
       )}

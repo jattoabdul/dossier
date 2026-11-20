@@ -13,10 +13,15 @@ export const autosaveDraftSnapshot = () => JSON.stringify(autosaveDraftKeys());
 export const emptyDraftSnapshot = () => "[]";
 export function draftDestination(key: string): { href: string; label: string } {
   if (key.startsWith("application:")) return { href: `/applications/${encodeURIComponent(key.split(":")[1])}`, label: "Application facts" };
-  const section = key.split(":")[0];
+  const parts = key.split(":");
+  const scoped = parts[0] === "profile" && parts.length >= 3;
+  const section = scoped ? parts[2] : parts[0];
   if (section === "settings") return key.endsWith("agent-query") ? { href: "/settings?section=agent", label: "Job agent" } : { href: "/settings?section=documents", label: "Document settings" };
-  const sections: Record<string, string> = { publication: "publications", education: "education", reference: "references", experience: "experience", project: "projects", fact: "facts" };
-  return { href: `/profile?section=${sections[section] ?? "basics"}`, label: sections[section] ?? "Profile basics" };
+  const sections: Record<string, string> = { publication: "publications", education: "education", reference: "references", experience: "experience", project: "projects", fact: "facts", certification: "certifications", summary: "summary" };
+  const target = scoped && section === "custom" ? `custom:${parts[3]}` : sections[section] ?? "basics";
+  const query = new URLSearchParams({ section: target });
+  if (scoped) query.set("profile", parts[1]);
+  return { href: `/profile?${query}`, label: section === "custom" ? "Custom section" : sections[section] ?? "Profile basics" };
 }
 export type AutosaveDraft<T> = { base: T; value: T };
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);

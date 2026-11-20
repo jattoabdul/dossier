@@ -34,7 +34,7 @@ test("waits for the newest edit before following a link", async ({ page }) => {
   await expect(page).toHaveURL(/\/profile$/);
   await expect(page.getByText("Saved just now")).toHaveCount(0);
   held.release();
-  await expect(page).toHaveURL(/\/resume$/);
+  await expect(page).toHaveURL(/\/resume(?:\?profile=[^&]+)?$/);
   await expectStoredName("Morgan Latest");
   await expect(page.getByRole("article", { name: "Resume" })).toContainText("Morgan Latest");
 });
@@ -81,7 +81,7 @@ test("does not navigate or report Saved after rejected writes; retry preserves t
   await expect(page.getByLabel("Full name")).toHaveValue("Morgan Retry");
   await page.unroute("**/profile**");
   await page.getByRole("link", { name: "See base resume →" }).click();
-  await expect(page).toHaveURL(/\/resume$/);
+  await expect(page).toHaveURL(/\/resume(?:\?profile=[^&]+)?$/);
   await expectStoredName("Morgan Retry");
 });
 
@@ -142,4 +142,22 @@ test("offers recovery for edits in a different section instead of claiming every
   await expect(page.getByLabel("Full name")).toHaveValue("Morgan Elsewhere");
   await expect(page.getByText("Saved just now")).toBeVisible();
   await expectStoredName("Morgan Elsewhere");
+});
+
+test("recovers an interrupted summary save in its own profile after switching elsewhere", async ({ page }) => {
+  const original = (await sql<{ id: string; headline: string }>('SELECT id, headline FROM "Profile" ORDER BY sort, "createdAt" LIMIT 1'))[0];
+  await sql(`INSERT INTO "Profile" (id, name, headline, summary, "updatedAt") VALUES ('recovery-profile', 'Recovery profile', 'Original headline', '', NOW())`);
+  await page.goto("/profile?profile=recovery-profile&section=summary");
+  const held = await holdSave(page);
+  await page.getByLabel("Headline", { exact: true }).fill("Recovered second profile");
+  await held.started;
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto(`/profile?profile=${original.id}&section=skills`);
+  held.abort();
+  await page.getByRole("link", { name: "Review summary", exact: true }).click();
+  await expect(page).toHaveURL(/profile=recovery-profile/);
+  await expect(page.getByLabel("Headline", { exact: true })).toHaveValue("Recovered second profile");
+  await expect(page.getByText("Saved just now")).toBeVisible();
+  expect(await sql('SELECT headline FROM "Profile" WHERE id=$1', [original.id])).toEqual([{ headline: original.headline }]);
+  expect(await sql('SELECT headline FROM "Profile" WHERE id=$1', ['recovery-profile'])).toEqual([{ headline: "Recovered second profile" }]);
 });

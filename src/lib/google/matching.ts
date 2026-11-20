@@ -45,13 +45,13 @@ export function companyDomains(application: Pick<MatchableApplication, "postingT
   return new Set(domains);
 }
 
-/** A company name as a word to look for: lowercase, without legal forms. */
-export function companyKey(company: string): string {
-  return company
+/** The words of a text, lowercase, without legal forms. */
+function companyWords(text: string): string[] {
+  return text
     .toLowerCase()
     .replace(/\b(gmbh|ag|se|inc|ltd|llc|bv|b\.v\.|plc|co|corp|corporation|limited|group|the)\b\.?/g, "")
-    .replace(/[^\p{L}\p{N}]+/gu, "")
-    .trim();
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
 }
 
 /** Automated account notices and vacancy digests are not application replies. */
@@ -63,6 +63,11 @@ export function isApplicationNoise(mail: Pick<MatchableMail, "fromAddress" | "su
 function containsCompany(value: string, key: string): boolean {
   const words = value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   return words.some((_, start) => words.slice(start, start + 6).some((_, end) => words.slice(start, start + end + 1).join("") === key));
+}
+
+/** A company name as a word to look for: lowercase, without legal forms. */
+export function companyKey(company: string): string {
+  return companyWords(company).join("");
 }
 
 export function matchMail(
@@ -84,7 +89,7 @@ export function matchMail(
       const candidate = byDomain[0];
       const key = companyKey(candidate.company);
       if (key && applications.some((application) => application.id !== candidate.id && companyKey(application.company) === key)) return { applicationId: null, by: "ambiguous" };
-      return { applicationId: candidate.id, by: "domain" };
+      return candidate.status === ApplicationStatus.DRAFT || isInProgress(candidate.status) ? { applicationId: candidate.id, by: "domain" } : null;
     }
   }
 
@@ -94,8 +99,9 @@ export function matchMail(
   const byCompany = applications.filter((application) => {
     const key = companyKey(application.company);
     return key.length >= 4 && (containsCompany(mail.fromName, key) || containsCompany(domain, key) || (recruitingSubject && containsCompany(mail.subject, key)));
+
   });
-  if (byCompany.length === 1 && byCompany[0].status !== ApplicationStatus.DRAFT) {
+  if (byCompany.length === 1 && byCompany[0].status !== ApplicationStatus.DRAFT && isInProgress(byCompany[0].status)) {
     return { applicationId: byCompany[0].id, by: "company" };
   }
   if (byCompany.length > 1) return { applicationId: null, by: "ambiguous" };

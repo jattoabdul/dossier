@@ -2,9 +2,11 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { EmailSendIntent } from "@/generated/prisma/client";
+import { Prisma, type EmailSendIntent } from "@/generated/prisma/client";
 import { emailAddresses } from "@/lib/application-email";
 import { prisma } from "@/lib/prisma";
+import { frozenDataForSend } from "@/lib/frozen-copy";
+import { lockForTransaction } from "@/lib/db-lock";
 import { advance } from "@/lib/status";
 import { accessToken, loadGoogleAccount } from "./account";
 import { GoogleError } from "./errors";
@@ -12,7 +14,7 @@ import { assertEmailSendingEnabled, findSentMessage, sendRawMail } from "./gmail
 import { buildMessage, parseAddress, toBase64Url, type OutgoingMail } from "./mime";
 
 const attachment = z.object({ fileName: z.string(), sha256: z.string(), data: z.string() });
-const payloadSchema = z.object({ raw: z.string(), from: z.string(), to: z.string(), subject: z.string(), body: z.string(), fromName: z.string(), attachments: z.array(attachment), replyThreadId: z.string().optional(), sendToken: z.uuid().optional(), replyRecipientVerified: z.boolean().optional() });
+const payloadSchema = z.object({ raw: z.string(), from: z.string(), to: z.string(), subject: z.string(), body: z.string(), fromName: z.string(), attachments: z.array(attachment), replyThreadId: z.string().optional(), sendToken: z.uuid().optional(), replyRecipientVerified: z.boolean().optional(), messageDraftFingerprint: z.string().optional(), frozenApplication: z.object({ frozen: z.unknown(), sections: z.unknown() }).optional() });
 export const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export type SendReview = { id: string; state: string; from: string; to: string; subject: string; body: string; attachments: string[] };
 const uncertain = () => new GoogleError("unavailable", "The send outcome is uncertain. Check send status before trying again. No further message will be sent.");
@@ -22,14 +24,14 @@ export function sendReview(intent: EmailSendIntent): SendReview {
   return { id: intent.id, state: intent.state, from: payload.from, to: payload.to, subject: payload.subject, body: payload.body, attachments: payload.attachments.map(a => a.fileName) };
 }
 
-export async function prepareIntent(input: { kind: "APPLICATION" | "REPLY"; targetId: string; applicationId: string | null; accountEmail: string; fingerprint: string; mail: OutgoingMail; threadId?: string; resend?: boolean; replyRecipientVerified?: boolean }) {
+export async function prepareIntent(input: { kind: "APPLICATION" | "REPLY" | "MESSAGE"; targetId: string; applicationId: string | null; accountEmail: string; fingerprint: string; mail: OutgoingMail; threadId?: string; resend?: boolean; replyRecipientVerified?: boolean; messageDraftFingerprint?: string; frozenApplication?: { frozen: Prisma.InputJsonValue; sections: Prisma.InputJsonValue } }) {
   assertEmailSendingEnabled();
   if ([input.mail.from, input.mail.to, input.mail.subject].some(value => /[\r\n]/.test(value))) throw new GoogleError("unavailable", "The sender, recipient and subject must each fit on one line.");
   const scope = `${input.kind}:${input.targetId}`;
   // Serialize independent processes/tabs, including replacement of an unsent review.
   return prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${scope}))::text`;
-    await tx.$queryRaw`SELECT 1 FROM "EmailSendIntent" WHERE scope = ${scope} FOR UPDATE`;
+    await lockForTransaction(tx, createHash("sha256").update(scope).digest().readInt32BE(0));
+    await tx.$executeRaw`UPDATE "EmailSendIntent" SET id = id WHERE scope = ${scope}`;
     const existing = await tx.emailSendIntent.findUnique({ where: { scope } });
     if (existing) {
       if (["SENDING", "UNKNOWN"].includes(existing.state) || (existing.state === "SENT" && !input.resend) || (existing.state === "PREPARED" && existing.fingerprint === input.fingerprint && existing.accountEmail === input.accountEmail)) return existing;
@@ -40,7 +42,7 @@ export async function prepareIntent(input: { kind: "APPLICATION" | "REPLY"; targ
     const raw = toBase64Url(buildMessage({ ...input.mail, messageId, sendToken }));
     // Gmail's raw payload is base64url encoded; keep a conservative size bound.
     if (raw.length > 30 * 1024 * 1024) throw new GoogleError("unavailable", "The email attachments are too large. Use smaller documents before sending.");
-    const payload = { raw, sendToken, replyRecipientVerified: input.replyRecipientVerified, from: input.mail.from, fromName: parseAddress(input.mail.from).name, to: input.mail.to, subject: input.mail.subject, body: input.mail.body,
+    const payload = { raw, sendToken, replyRecipientVerified: input.replyRecipientVerified, messageDraftFingerprint: input.messageDraftFingerprint, frozenApplication: input.frozenApplication, from: input.mail.from, fromName: parseAddress(input.mail.from).name, to: input.mail.to, subject: input.mail.subject, body: input.mail.body,
       attachments: (input.mail.attachments ?? []).map(a => ({ fileName: a.fileName, data: Buffer.from(a.data).toString("base64"), sha256: createHash("sha256").update(a.data).digest("hex") })),
       ...(input.threadId ? { replyThreadId: input.threadId } : {}) };
     return tx.emailSendIntent.create({ data: { scope, kind: input.kind, targetId: input.targetId, applicationId: input.applicationId, accountEmail: input.accountEmail, fingerprint: input.fingerprint, messageId, payload } });
@@ -55,25 +57,29 @@ async function requireAccount(intent: EmailSendIntent) {
 /** One local transaction records delivery, thread, reply handling and status together. */
 async function recordSent(id: string, sent: { id: string; threadId: string; messageId?: string }, deliveredAt?: Date) {
   return prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT 1 FROM "EmailSendIntent" WHERE id = ${id} FOR UPDATE`;
+    await tx.$executeRaw`UPDATE "EmailSendIntent" SET id = id WHERE id = ${id}`;
     const intent = await tx.emailSendIntent.findUniqueOrThrow({ where: { id } });
     if (intent.state === "SENT") return intent;
     const payload = payloadSchema.parse(intent.payload);
     const now = deliveredAt ?? intent.attemptedAt ?? new Date();
     let eventId: string | null = null;
     if (intent.applicationId) {
-      await tx.$queryRaw`SELECT 1 FROM "Application" WHERE id = ${intent.applicationId} FOR UPDATE`;
+      await tx.$executeRaw`UPDATE "Application" SET id = id WHERE id = ${intent.applicationId}`;
       const app = await tx.application.findUniqueOrThrow({ where: { id: intent.applicationId } });
       if (intent.kind === "APPLICATION") {
         await tx.application.update({ where: { id: app.id }, data: { emailThreadId: sent.threadId } });
         if (app.status === "DRAFT") {
           const change = advance(app, "SENT", now);
           if (change) {
-            await tx.application.update({ where: { id: app.id }, data: change.update });
-            eventId = (await tx.statusEvent.create({ data: { applicationId: app.id, ...change.event } })).id;
+            await tx.application.update({ where: { id: app.id }, data: { ...change.update, boardSort: null, sentVia: "GMAIL", ...(payload.frozenApplication ? { frozen: payload.frozenApplication.frozen as Prisma.InputJsonValue, sections: payload.frozenApplication.sections as Prisma.InputJsonValue } : await frozenDataForSend(tx, app.id)) } });
+            eventId = (await tx.statusEvent.create({ data: { applicationId: app.id, ...change.event, previousBoardSort: app.boardSort } })).id;
           }
         }
       }
+    }
+    if (intent.kind === "MESSAGE" && intent.applicationId) {
+      const app = await tx.application.findUniqueOrThrow({ where: { id: intent.applicationId } });
+      if (digest(app.messageDraft) === payload.messageDraftFingerprint) await tx.application.update({ where: { id: app.id }, data: { messageDraft: Prisma.DbNull } });
     }
     if (intent.kind === "REPLY") {
       // Preserve a newer draft edited in another tab while this send was in flight.
@@ -93,7 +99,7 @@ export async function confirmIntent(id: string) {
   await requireAccount(intent);
   if (intent.state === "SENT") return intent;
   if (intent.state !== "PREPARED") throw uncertain();
-  if (intent.kind === "APPLICATION") {
+  if (intent.kind !== "REPLY") {
     const source = intent.applicationId && await prisma.application.findUnique({ where: { id: intent.applicationId }, select: { archivedAt: true } });
     if (!source || source.archivedAt) throw new GoogleError("unavailable", "This application was removed or archived. Review it again before sending.");
   } else {
@@ -101,7 +107,7 @@ export async function confirmIntent(id: string) {
     if (!source || source.dismissedAt || source.handledAt) throw new GoogleError("unavailable", "This email was removed or already handled. Review it again before sending.");
   }
   const payload = payloadSchema.parse(intent.payload);
-  if (intent.kind === "REPLY" && !payload.replyRecipientVerified) throw new GoogleError("unavailable", "Review this reply again so its recipient can be checked before sending.");
+  if (["REPLY", "MESSAGE"].includes(intent.kind) && !payload.replyRecipientVerified) throw new GoogleError("unavailable", "Review this reply again so its recipient can be checked before sending.");
   await accessToken("send", undefined, intent.accountEmail);
   // Do not perform any external write unless this durable compare-and-set wins.
   const claim = await prisma.emailSendIntent.updateMany({ where: { id, state: "PREPARED" }, data: { state: "SENDING", attemptedAt: new Date() } });
